@@ -1,0 +1,172 @@
+# 根文件系统
+1、内存文件系统
+	image-initrd.img
+	内核将image-initrd.img 保存在rootfs(/) 下的initrd.image文件中， 将其读入/dev/ram0中，挂载/dev/ram0，将根切换到/dev/ram0
+	如果启动参数root = /dev/ram0则在当前根目录下(即image-initrd.img中)找init进程中去执行启动，否则执行/linuxrc (image-initrd.img中的)
+	来挂载真正的根文件系统，执行完成后返回内核，内核再把根切换到真正的根文件系统，卸载/dev/ram0，在真正的根文件系统中找到init进程的文件并执行
+
+	
+	cpio-initrd.img
+	将initrd的内容释放到/rootfs中。（rootfs本身也是一个基于内存的文件系统。这样就省掉了ramdisk的挂载、卸载等）
+	执行initrd中的/init文件，执行到这一点，内核的工作全部结束，完全交给/init文件处理。也就是其实到了最后一步，
+	内核就已经完成了自己所有的工作，直接移交给initrd 的/init。   
+
+
+	
+	cpio-initramfs
+	initramfs : （内核+cpio包编译在一起然后一起进行内核压缩）
+	内核文件包含了的一个cpio归档文件，该归档文件可能被外部的一个cpio包替换由initramfs里的/init 挂真实的根文件并启动init进程/sbin/init
+	initramfs和cpio-initrd的区别, initramfs是将cpio rootfs编译进内核一起压缩，而 cpio-initrd中cpio rootfs是不编译入内核，是外部的
+	
+	
+	
+2、物理块设备根文件系统
+	root = /dev/mtdxxx  noinitrd方式，直接挂载该块设备,再切换根到该块设备，找到init进程并执行(即在块设备中寻找init进程的文件)
+
+3、init进程文件名指定：
+	1)如果定义了rinit=xxxx，则以该文件作为init进程，否则如果/init存在则以/init作为init进程
+	2)在1)失败的情况下，如果定义了init=xxxx，则以该文件作为init进程
+	3)在1)2)失败的情况下，以/sbin/init作为init进程
+	4)在1)2)3)失败的情况下，以/etc/init作为init进程
+	5)在1)2)3)4)失败的情况下，以/bin/init作为init进程
+	6)在1)2)3)4)5)失败的情况下，以/bin/init作为init进程
+	
+	
+一，       Ramdisk
+
+Ram Disk 就是将内存中的一块区域作为物理磁盘来使用的一种技术。
+
+使用时内核配置：两个选项：第一个设定Ramdisk个数，默认16个；第二个是设定Ramdisk的大小，设定16M
+Device Drivers --->
+
+[*] Block devices --->
+
+<*>  RAM block device support
+
+(16)   Default number of RAM disks
+
+(16384) Default RAM disk size (kbytes)
+
+另外：设置RAM disk 支持
+
+General setup  --->
+
+[*] Initial RAM filesystem and RAM disk (initramfs/initrd) support
+
+ 
+
+二，       initrd
+
+initrd全称是 initial RAM disk ，它提供一种让核心可以简单使用Ramdisk的能力，简单的说，这些能力包括：
+
+格式化一个 Ramdisk；
+
+加载文件系统内容到Ramdisk；
+
+将Ramdisk作为根文件系统；
+
+ 
+
+而Linux启动阶段的Ramdisk相当于一个未格式化的硬盘分区，核心可以直接将initrd的内容释放到一个未初始化的Ramdisk里，这个过程与Ghost恢复一个分区的过程十分相似。于是，相应的内容被加载到相应的Ramdisk中，同时，这个Ramdisk也被格式化成某种由initrd格式所表达的分区格式。
+
+ 
+
+initrd支持的格式
+
+· Romfs文件系统；
+
+· Ext2文件系统；
+
+· cramfs文件系统；
+
+· minix文件系统；
+
+ 
+
+三，       Gzip支持
+
+如果核心选择了Gzip支持（通常这是默认的，在init/do_mounts_rd.c中定义的BUILD_CRAMDISK宏）还可以使用Gzip压缩的initrd。相关的代码可以在核心源码 drivers/block/rd.c:identify_ramdisk_image 中找到。
+
+ 
+
+四，       制作initrd
+
+initrd有两种格式，initrd-image和initrd-cpio。
+
+办法一
+
+通过ramdisk来制作的方法比较简单(以ext2文件系统为例)：
+redice # mkfs.ext2 /dev/ram0
+redice # mount /dev/ram0 /mnt/rd
+redice # cp _what_you_like_ /mnt/rd # 把需要的文件复制过去
+redice # dd if=/dev/ram0 of=/tmp/initrd
+redice # gzip -9 /tmp/initrd
+这个过程也最能够解释initrd的本质，对于Linux来说，Ramdisk的一个块设备，而initrd是这个块设备上所有内容的“克隆”（由
+命令dd来完成）而生成的文件。核心中加载initrd相关的代码则用于完成将相反的过程，即将这一个文件恢复到Ramdisk中去。
+
+办法二
+
+通过loop设备来制作initrd的过程：
+redice # dd if=/dev/zero of=/tmp/initrd bs=1024 count=4096 # 制作一个4M的空白文件
+redice # losetup /dev/loop0 /tmp/initrd # 映射到loop设备上；
+redice # mkfs.ext2 /dev/loop0 # 创建文件系统；
+redice # mount /dev/loop0 /mnt/rd
+redice # cp _what_you_like_ /mnt/rd # 复制需要的文件；
+redice # umount /mnt/rd
+redice # losetup -d /dev/loop0
+redice # gzip -9 /tmp/initrd
+
+办法三
+
+bash# dd if=/dev/zero of=../initrd.img bs=512k count=5
+bash# mkfs.ext2 -F -m0 ../initrd.img
+bash# mount -t ext2 -o loop ../initrd.img   /mnt
+
+
+bash# cp -r   * /mnt
+
+
+bash# umount /mnt
+bash# gzip -9 ../initrd.img
+
+ 
+
+办法四（新式INITRD：cpio-initrd的制作)
+
+
+
+# find . | cpio -c -o > ../initrd.img
+# gzip ../initrd.img
+解压initrd
+gunzip initrd.img.gz
+即使您的 initrd 映像文件不是以 .gz 结尾，它也可能是一个压缩文件，
+可以给这个文件添加上 .gz后缀，然后再使用 gunzip 对其进行解压。
+
+cpio 归档文件
+# mkdir temp ; cd temp
+# cp /boot/initrd-2.6.14.2.img initrd-2.6.14.2.img.gz 　　
+# gunzip initrd-2.6.14.2.img.gz 　　
+#cpio -ivmd < initrd-2.6.14.2.img
+
+
+
+Linux内存文件系统：可满足高IO的要求
+
+ramdisk: 基于虚拟在内存中的其他文件系统(ex2fs)。
+挂载方式：mount /dev/ram /mnt/ramdisk
+ramfs: 物理内存文件系统，只存在于物理内存中。其大小也不是固定的，而是随着所需要的空间动态得增减。
+挂载方式：mount -t ramfs none /mnt/ramfs -o maxsize=2000
+tmpfs: 虚拟内存文件系统，不同于块设备形式实现的ramdisk， 也不同于真对物理内存实现的ramfs 文件系统。
+tmpfs 可以使用物理内存，也能使用交换分区。
+挂载方式：mount tmpfs /mnt/tmpfs -t tmpfs -o size=32m
+
+
+
+ramfs和tmpfs的区别
+特性	 tmpfs	ramfs
+ 达到空间上限时继续写入	提示错误信息并终止	 可以继续写尚未分配的空间
+是否固定大小	是	否
+ 是否使用swap	是	否
+ 具有易失性	是	 是
+
+

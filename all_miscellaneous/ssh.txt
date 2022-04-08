@@ -1,0 +1,15 @@
+socks5代理转发，在本地的1080端口建立socks5服务器
+sshpass -p xxxx ssh  -o StrictHostKeyChecking=no -o TCPKeepAlive=yes -o ServerAliveInterval=30 -CqTnN -D 127.0.0.1:1080   -p8888 forwarding@155.94.134.140
+反向代理，将本地的80端口映射到155.94.134.140的3859端口
+ssh  -o StrictHostKeyChecking=no -o TCPKeepAlive=yes -o ServerAliveInterval=30 -CqTnN -R 0.0.0.0:3859:0.0.0.0:80 -p8888 root@155.94.134.140
+
+正向代理，将本地1080端口的数据转发到204.44.75.142的7654端口
+ssh  -o StrictHostKeyChecking=no -o TCPKeepAlive=yes -o ServerAliveInterval=30 -CqTnN  -L 127.0.0.1:1080:127.0.0.1:7654   -p8888 forwarding@204.44.75.142
+
+-C 为压缩数据
+-q 安静模式
+-T 禁止远程分配终端
+-n 关闭标准输入
+-N 不执行远程命令
+ -f 参数，把 ssh 放到后台运行。
+-g 在-D/L时起作用，把原本绑定在127.0.0.1 的端口绑定在 0.0.0.0 上，这样可以开放给其他机器通过你的 IP:Port 来使用这个隧道。

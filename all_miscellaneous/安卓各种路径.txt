@@ -1,0 +1,165 @@
+Android开发过程,避免不了数据的一些持久化的操作,合理选择一个路径,对我们来说,相当的重要.下面列出了一些开发中一些常用的,有不足的地方,欢迎大家补充.
+
+package com.liujigang.testapps;
+ 
+import android.app.Activity;
+import android.content.Context;
+import android.os.Bundle;
+import android.os.Environment;
+import android.util.Log;
+ 
+import java.io.File;
+ 
+/**
+ * Created by liujigang on 2014/10/13 0013.
+ * <p/>
+ * <p/>
+ * context.getFilesDir() = /data/data/com.liujigang.testapps/files<p/>
+ * context.getCacheDir() = /data/data/com.liujigang.testapps/cache<p/>
+ * context.getExternalCacheDir() = /storage/emulated/0/Android/data/com.liujigang.testapps/cache<p/>
+ * context.getExternalFilesDir(null) = /storage/emulated/0/Android/data/com.liujigang.testapps/files<p/>
+ * context.getExternalFilesDir("image") = /storage/emulated/0/Android/data/com.liujigang.testapps/files/image<p/>
+ * context.getPackageName() = com.liujigang.testapps<p/>
+ * context.getPackageCodePath() = /data/app/com.liujigang.testapps-1.apk<p/>
+ * context.getDatabasePath("config.db") = /data/data/com.liujigang.testapps/databases/config.db<p/>
+ * context.getPackageResourcePath() = /data/app/com.liujigang.testapps-1.apk<p/>
+ * context.getDir("temp", Context.MODE_PRIVATE) = /data/data/com.liujigang.testapps/app_temp<p/>
+ * Environment.getExternalStorageDirectory() = /storage/emulated/0<p/>
+ * Environment.getDataDirectory() = /data<p/>
+ * Environment.getDownloadCacheDirectory() = /cache<p/>
+ * Environment.getRootDirectory() = /system<p/>
+ * Environment.getExternalStoragePublicDirectory("others") = /storage/emulated/0/others<p/>
+ * <p/>
+ * <p/>
+ * MEDIA_BAD_REMOVAL 非法移除状态:移除sdcard之前,没有卸载sdcard<p/>
+ * MEDIA_CHECKING 检查状态:检查sdcard的有效性,正在磁盘检查<p/>
+ * MEDIA_MOUNTED 挂载状态:sdcard卡已经成功挂载,并具有读/写权限<p/>
+ * MEDIA_MOUNTED_READ_ONLY 只读状态:sdcard已经挂载,但是是只读的<p/>
+ * MEDIA_NOFS NOFS状态:识别到sdcard卡,但无法挂载.无法挂载原因,可能是sdcard无存储介质,或者sdcard卡的文件系统与android无兼容<p/>
+ * MEDIA_REMOVED 移除状态:sdcard成功移除<p/>
+ * MEDIA_SHARED SDCard 共享状态:识别到sdcard卡,但sdcard未挂载,而是作为mass storage等设备(如以u盘的方式连接到电脑上)<p/>
+ * MEDIA_UNMOUNTABLE 无法挂载状态:识别到sdcard卡,但无法挂载.无法挂载的原因,可能是sdcard的存储介质部分损坏<p/>
+ * MEDIA_UNMOUNTED 未挂载：识别到sdcard,但没有挂载<p/>
+ * <p/>
+ * <p/>
+ * Environment.DIRECTORY_ALARMS 标准的铃声目录<p/>
+ * Environment.DIRECTORY_DCIM 相机拍照或录像文件的存储目录<p/>
+ * Environment.DIRECTORY_DOWNLOADS 下载目录<p/>
+ * Environment.DIRECTORY_MOVIES 电影目录<p/>
+ * Environment.DIRECTORY_MUSIC 音乐目录<p/>
+ * Environment.DIRECTORY_NOTIFICATIONS 提示音目录<p/>
+ * Environment.DIRECTORY_PICTURES 图片目录<p/>
+ * Environment.DIRECTORY_PODCASTS 播客目录<p/>
+ * Environment.DIRECTORY_RINGTONES 铃声目录<p/>
+ */
+public class MainActivity extends Activity {
+    private String TAG = "MainActivity";
+    private Context context;
+ 
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        context = getApplicationContext();
+ 
+        File filesDir = context.getFilesDir();//file路径
+        File cacheDir = context.getCacheDir();//缓存路径
+        File externalCacheDir = context.getExternalCacheDir();//获取应用程序sd卡缓存路径
+        File externalFilesDir = context.getExternalFilesDir(null);//获取应用程序sd卡file路径
+        File externalFilesDirImg = context.getExternalFilesDir("image");//会自动创建文件夹
+ 
+        String packageName = context.getPackageName();//应用包名
+        String packageCodePath = context.getPackageCodePath();//应用apk 文件路径
+        File databasePath = context.getDatabasePath("config.db");//获取应用中的数据库路径,不自动创建,当databases 文件夹不存在时,报空指针异常
+        String packageResourcePath = context.getPackageResourcePath();//应用apk 文件路径
+        File contextDir = context.getDir("temp", Context.MODE_PRIVATE);// 创建文件夹 /data/data/包名/app_xxx 的文件夹
+ 
+        File externalStorageDirectory = Environment.getExternalStorageDirectory();// /storage/emulated/0 外在存储卡路径
+        File dataDirectory = Environment.getDataDirectory();// /data文件夹,一般应用无权限操作
+        File downloadCacheDirectory = Environment.getDownloadCacheDirectory();// /cache文件夹,一般应用无权限操作
+        File rootDirectory = Environment.getRootDirectory();// /system 文件夹,需要root 权限
+        File externalStoragePublicDirectory = Environment.getExternalStoragePublicDirectory("others");//获取外部存储卡一个公开的文件夹,这个文件夹不一定存在,要使用前,要创建(File.mkdirs())
+ 
+ 
+        Log.i(TAG, "context.getFilesDir() = " + filesDir.getPath());
+        Log.i(TAG, "context.getCacheDir() = " + cacheDir.getPath());
+        Log.i(TAG, "context.getExternalCacheDir() = " + externalCacheDir.getPath());
+        Log.i(TAG, "context.getExternalFilesDir(null) = " + externalFilesDir.getPath());
+        Log.i(TAG, "context.getExternalFilesDir(\"image\") = " + externalFilesDirImg.getPath());
+ 
+        Log.i(TAG, "context.getPackageName() = " + packageName);
+        Log.i(TAG, "context.getPackageCodePath() = " + packageCodePath);
+        Log.i(TAG, "context.getDatabasePath(\"config.db\") = " + databasePath.getPath());
+        Log.i(TAG, "context.getPackageResourcePath() = " + packageResourcePath);
+        Log.i(TAG, "context.getDir(\"temp\", Context.MODE_PRIVATE) = " + contextDir.getPath());
+ 
+        Log.i(TAG, "Environment.getExternalStorageDirectory() = " + externalStorageDirectory.getPath());
+        Log.i(TAG, "Environment.getDataDirectory() = " + dataDirectory.getPath());
+        Log.i(TAG, "Environment.getDownloadCacheDirectory() = " + downloadCacheDirectory.getPath());
+        Log.i(TAG, "Environment.getRootDirectory() = " + rootDirectory.getPath());
+        Log.i(TAG, "Environment.getExternalStoragePublicDirectory(\"others\") = " + externalStoragePublicDirectory.getPath());
+    }
+ 
+}
+
+上面的Java类在activity中,获取了一些常用的路径,在log中显示.
+具体效果如下图:
+
+
+context.getFilesDir() = /data/data/com.liujigang.testapps/files
+context.getCacheDir() = /data/data/com.liujigang.testapps/cache
+context.getExternalCacheDir() = /storage/emulated/0/Android/data/com.liujigang.testapps/cache
+context.getExternalFilesDir(null) = /storage/emulated/0/Android/data/com.liujigang.testapps/files
+context.getExternalFilesDir("image") = /storage/emulated/0/Android/data/com.liujigang.testapps/files/image
+context.getPackageName() = com.liujigang.testapps
+context.getPackageCodePath() = /data/app/com.liujigang.testapps-1.apk
+context.getDatabasePath("config.db") = /data/data/com.liujigang.testapps/databases/config.db
+context.getPackageResourcePath() = /data/app/com.liujigang.testapps-1.apk
+context.getDir("temp", Context.MODE_PRIVATE) = /data/data/com.liujigang.testapps/app_temp
+Environment.getExternalStorageDirectory() = /storage/emulated/0
+Environment.getDataDirectory() = /data
+Environment.getDownloadCacheDirectory() = /cache
+Environment.getRootDirectory() = /system
+Environment.getExternalStoragePublicDirectory("others") = /storage/emulated/0/others
+
+不过我们在使用sd卡过程,要判断sd卡的状态,还要使用到Environment中的字段[其中 Environment.MEDIA_MOUNTED 通常用来判断sd卡路径是否可用]:
+Environment.MEDIA_BAD_REMOVAL 非法移除状态：移除sdcard之前，没有卸载sdcard。
+Environment.MEDIA_CHECKING 检查状态：检查sdcard的有效性,正在磁盘检查
+Environment.MEDIA_MOUNTED 挂载状态：sdcard卡已经成功挂载,并具有读/写权限
+Environment.MEDIA_MOUNTED_READ_ONLY 只读状态：sdcard已经挂载，但是是只读的。
+Environment.MEDIA_NOFS NOFS状态：识别到sdcard卡，但无法挂载。无法挂载原因，可能是sdcard无存储介质，或者sdcard卡的文件系统与android无兼容。
+Environment.MEDIA_REMOVED 移除状态：sdcard成功移除
+Environment.MEDIA_SHARED SDCard 共享状态：识别到sdcard卡，但sdcard未挂载，而是作为mass storage等设备(如以u盘的方式连接到电脑上)。
+Environment.MEDIA_UNMOUNTABLE 无法挂载状态：识别到sdcard卡，但无法挂载。无法挂载的原因，可能是sdcard的存储介质部分损坏。
+Environment.MEDIA_UNMOUNTED 未挂载：识别到sdcard，但没有挂载
+
+如果要做的更完善些的话,不仅要判断sd卡路径是否有效,还要每次存储时判断存储空间是否充足,还要跟完善些的话,还要写一个监听,来避免在存储过程中sd卡不可用了.
+
+最后,附上一个常用的获取路径的代码:
+
+    private String getPath() {
+        String path;
+        if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
+            File ef = getApplicationContext().getExternalFilesDir(null);
+            if (ef != null && ef.isDirectory()) {
+                path = ef.getAbsolutePath() + "/apk/";
+            } else {
+                path = getApplicationContext().getCacheDir().getPath() + "/apk/";
+            }
+        } else {
+            path = getApplicationContext().getCacheDir().getPath() + "/apk/";
+        }
+        return path;
+    }
+个人认为:上面的"/",应该用File.separator来替代显得更专业些.
+
+最后附上一些多媒体相关的路径:
+
+Environment.DIRECTORY_ALARMS 标准的铃声目录
+Environment.DIRECTORY_DCIM 相机拍照或录像文件的存储目录
+Environment.DIRECTORY_DOWNLOADS 下载目录
+Environment.DIRECTORY_MOVIES 电影目录
+Environment.DIRECTORY_MUSIC 音乐目录
+Environment.DIRECTORY_NOTIFICATIONS 提示音目录
+Environment.DIRECTORY_PICTURES 图片目录
+Environment.DIRECTORY_PODCASTS 播客目录
+Environment.DIRECTORY_RINGTONES 铃声目录

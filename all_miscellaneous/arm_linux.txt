@@ -1,0 +1,43 @@
+export PRJROOT=/home/ghj/ARM/
+export TARGET=arm-linux
+export PREFIX=$PRJROOT/cross_compiler
+export TARGET_PREFIX=$PREFIX/$TARGET
+
+make ARCH=arm CROSS_COMPLIE=arm-linux- menuconfig
+
+
+清零bit3
+
+a&=~(1<<3);
+
+置一bit4
+
+a|=(1<<3)
+
+
+
+makefile编写
+
+
+目标:[空格]依赖1[空格]依赖2
+[tab键]指令
+
+CFLAGS :=-Wall -Wstrict-prototypes -O2 -fomit-frame-pointer -ffreestanding
+hello : hello.c startup.s
+#编译
+	arm-linux-gnueabi-gcc $(CFLAGS) -c -o startup.o startup.s
+	arm-linux-gnueabi-gcc $(CFLAGS) -c -o hello.o hello.c
+#链接（通过直接指定代码段地址或者引入链接文件二选一）
+	arm-linux-gnueabi-ld -Ttext 0x00000000 startup.o hello.o -o hello_elf
+#	arm-linux-gnueabi-ld -Thello.lds startup.o hello.o -o hello_elf
+#掐掉elf文件头尾成保留中间二进制执行段
+	arm-linux-gnueabi-objcopy -o binary -S hello_elf hello.bin
+#反汇编
+	arm-linux-gnueabi-objdump -D -m arm hello_elf  > hello.dis
+clean:
+	rm -f hello_elf *.o
+
+
+
+
+链接文件编写

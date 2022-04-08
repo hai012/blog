@@ -1,0 +1,29 @@
+头文件：#include <unistd.h>
+
+定义函数：int chdir(const char * path);
+函数说明：chdir()用来将当前的工作目录改变成以参数path 所指的目录.
+返回值执：行成功则返回0, 失败返回-1, errno 为错误代码.
+
+
+char *getcwd(char *buf, size_t size);
+作用:把当前目录的绝对地址保存到 buf 中,buf 的大小为 size。
+如果 size太小无法保存该地址，返回 NULL 并设置 errno 为 ERANGE。
+可以采取令 buf 为 NULL并使 size 为0来使 getcwd 调用 malloc 动态
+给 buf 分配,但是这种情况要特别注意使用后释放缓冲以防止内存泄漏。
+
+范例
+#include <unistd.h>
+int main()
+{
+    chdir("/tmp");
+    char * ptr=getcwd(NULL, NULL);
+    printf("current working directory: %s\n",ptr );
+    free(ptr);
+    return 0;
+}
+
+
+
+
+
+

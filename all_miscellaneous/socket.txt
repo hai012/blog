@@ -1,0 +1,15 @@
+recv返回>0 接收成功
+recv返回0 说明对方套接字关闭，或读取长度为0且内核中套接字接收缓冲有数据
+recv返回-1 errno=EINTR表示被系统调用打断
+recv返回-1 errno=EAGAIN or EWOULDBLOCK表示本应阻塞等待操作完成
+recv返回-1 errno=其他，表示参数有问题
+
+send返回>=0 发送成功
+send返回-1 errno=EINTR表示被系统调用打断
+send返回-1 errno=EAGAIN or EWOULDBLOCK表示本应阻塞等待操作完成
+send返回-1 errno=ECONNRESET说明对方套接字关闭
+send返回-1 errno=其他，表示参数有问题
+
+在阻塞模式下send是否阻塞取决于内核中套接字发送缓冲中剩余的地方是否能装下
+需要send的数据，如果不能则先装一部分，等又有空余时再装剩下的，直到所有的
+数据拷贝进内核后send才返回。

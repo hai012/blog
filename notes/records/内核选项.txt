@@ -1,8 +1,0 @@
-initramfs     	  https://blog.csdn.net/htttw/article/details/7217706
-initramfs      	 https://blog.csdn.net/tankai19880619/article/details/12093239
-initramfs与initrd         https://blog.csdn.net/laohuang1122/article/details/8240451
-
-Linux内核配置参考     https://blog.csdn.net/qq_27522735/article/details/53207878
-
-
-设备树 http://www.techbulo.com/2146.html

@@ -1,0 +1,52 @@
+
+UFCON=0x111   
+
+
+//////////////////////地址无关//////////////////////////////////////////
+reset
+	cpu_init_crit
+			lowlevel_init.S
+						mem_init_tiny4412.S
+						load_uboot
+						enable_mmu
+						board_init_f
+									relocate_code
+/////////////////////于连接地址执行//////////////////////////////////////////
+									。。。。。。
+									board_init_r
+
+arm-linux-gnueabi-ld.bfd   -g -Ttext 0x81000000 -o examples/standalone/hello_world -e hello_world examples/standalone/hello_world.o examples/standalone/libstubs.o arch/arm/lib/lib.a
+
+
+
+
+  arm-linux-gnueabi-ld.bfd   -pie  --gc-sections -Bstatic  --no-dynamic-linker -Ttext 0x81700000 -o u-boot -T u-boot.lds arch/arm/cpu/arm926ejs/start.o --start-group  arch/arm/cpu/built-in.o  arch/arm/cpu/arm926ejs/built-in.o  arch/arm/lib/built-in.o  arch/arm/mach-sunxi/built-in.o  board/sunxi/built-in.o  cmd/built-in.o  common/built-in.o  disk/built-in.o  drivers/built-in.o  drivers/dma/built-in.o  drivers/gpio/built-in.o  drivers/i2c/built-in.o  drivers/mtd/built-in.o  drivers/mtd/onenand/built-in.o  drivers/mtd/spi/built-in.o  drivers/net/built-in.o  drivers/net/phy/built-in.o  drivers/pci/built-in.o  drivers/power/built-in.o  drivers/power/battery/built-in.o  drivers/power/domain/built-in.o  drivers/power/fuel_gauge/built-in.o  drivers/power/mfd/built-in.o  drivers/power/pmic/built-in.o  drivers/power/regulator/built-in.o  drivers/serial/built-in.o  drivers/spi/built-in.o  drivers/usb/common/built-in.o  drivers/usb/dwc3/built-in.o  drivers/usb/emul/built-in.o  drivers/usb/eth/built-in.o  drivers/usb/gadget/built-in.o  drivers/usb/gadget/udc/built-in.o  drivers/usb/host/built-in.o  drivers/usb/musb-new/built-in.o  drivers/usb/musb/built-in.o  drivers/usb/phy/built-in.o  drivers/usb/ulpi/built-in.o  env/built-in.o  fs/built-in.o  lib/built-in.o  net/built-in.o  test/built-in.o  test/dm/built-in.o --end-group arch/arm/lib/eabi_compat.o  arch/arm/lib/lib.a -Map u-boot.map;  true
+  (cd spl && arm-linux-gnueabi-ld.bfd   -T u-boot-spl.lds  --gc-sections -Bstatic --gc-sections  --no-dynamic-linker -Ttext 0x60 arch/arm/cpu/arm926ejs/start.o --start-group arch/arm/mach-sunxi/built-in.o arch/arm/cpu/arm926ejs/built-in.o arch/arm/cpu/built-in.o arch/arm/lib/built-in.o board/sunxi/built-in.o common/spl/built-in.o common/init/built-in.o common/built-in.o cmd/built-in.o env/built-in.o lib/built-in.o disk/built-in.o drivers/built-in.o dts/built-in.o fs/built-in.o  --end-group arch/arm/lib/eabi_compat.o arch/arm/lib/lib.a -Map u-boot-spl.map -o u-boot-spl)
+
+
+arm-linux-gnueabi-gcc -nostdlib  -o boot boot.S
+sunxi-fel -p write 0x00000060 spl/u-boot-spl.bin
+sunxi-fel exec 0x81700000
+
+
+sunxi-fel -p write 0x80600000 boot.bin
+cd ../linux-5.4.28
+sunxi-fel -p write 0x81000000 arch/arm/boot/zImage
+sunxi-fel -p write 0x80800000 arch/arm/boot/dts/suniv-f1c100s-licheepi-nano.dtb
+sunxi-fel exe  0x80600000
+
+f1c00s检测到SPI_CLK被拉低了则不从SPIflash启动
+f1c00s的内部sram起始地址位于0x00000000,uboot-spl链接地址为0x60,0~0x60之间需要放校验等认证信息
+
+//修改官方的uboot使得可以初始化DDR后通过fel命令进入fel模式
+参考git clone https://github.com/uestczyh222/tina-spl.git
+tina-spl默认没有加header，加header后太大导致sunxi-fel下载失败，且从spiflash启动时ROM中的代码无法将整个
+tina-spl生成的header+bin文科拷贝到SRAM，需要对tina-spl瘦身，sunxi-fel能整个下载后，再焼写到进spiFlash 
+6000+byte可以  8194不行
+
+
+
+sudo sunxi-fel -p write  0x00000000 tina-spl.bin
+sudo sunxi-fel exec 0x00000000//执行后初始化DDR进入fel
+sudo sunxi-fel -p write  0x80000000 rtthread.bin
+sudo sunxi-fel exec 0x80000000

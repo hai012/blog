@@ -1,0 +1,105 @@
+默认启动内核通过/sbin/init创建init进程
+init进程读取/etc/inittab确定runlevel(id:2:initdefault:)和sysinit脚本(比如si::sysinit:/etc/init.d/rcS)
+init进程fork出子进程执行/etc/init.d/rcS脚本,并将runlevel作为参数传递
+/etc/init.d/rcS直接exec/etc/init.d/rc并传递runlevel参数S给/etc/init.d/rc
+/etc/init.d/rc根据runlevel调用的/etc/rcX.d/下的脚本
+/etc/rcX.d/下全是符号链接，链接指向/etc/init.d/下真正开机需要自启的脚本
+/etc/init.d/下的脚本只在开机时被调用一次，之后是否崩溃init进程统统不管了
+/etc/init.d/下的符号链接K和S分别表示停止和开始的时候执行，其后的数字越小则越先执行
+
+后面跟的2位数数字是启动或者停止顺序
+
+如果需要创建崩溃后自启的服务，需要编辑/etc/inittab，在inittab中
+id:runlevels:action:process
+id 用来定义在inittab文件唯一的条目编号，长度为 1-4个字符
+runlevels 列出来运行的级别 为空则代表所有级别
+action 要执行的动作：
+	initdefault
+	sysinit
+	ctrlaltdel(按下ctrl+alt+delete后执行的动作)
+	powerfail(服务器在UPS前提下，当突然断电，服务器就会倒计时2分钟,在这2分钟内执行)
+	powerokwait(也就是上面的倒计时未结束（在2分钟之内）再来电，这个时候执行)
+	respawn(终止后init进程会自动重启该服务，尝试重新生成并在两分钟内失败超过十次，则 Linux 将禁用在接下来的五分钟内重新启动)
+process 要执行的程序
+
+例如
+id:2:initdefault:
+id 就使用id本身来定义
+2 就是列出的运行级别
+initdefault这个动作就是设定默认的运行级别，如果前面runlevels不指定运行级别，那么会在启动时在终端询问，
+这一行不需要process这一段
+
+si::sysinit:/etc/init.d/rcS
+si 是用来标识的id
+runlevels 为空则代表的是 所有的运行级别
+sysinit 是指在系统启动时执行后面的process（也就是/etc/rc.d/rcS脚本）
+
+rinetd:2:respawn:/etc/init.d/rinet -f -c /etc/rinetd.conf raw eth0
+rinetd是用来标识的id，运行级别为2，退出后由init进程会自动重启该服务
+
+
+https://blog.csdn.net/zhouyong0/article/details/7950868
+
+
+/etc/init.d/XXX文件的格式：
+
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides: OSSEC HIDS
+# Required-Start: $network $remote_fs $syslog $time 或者$all
+# Required-Stop: $all
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description: OSSEC HIDS
+### END INIT INFO
+#! /bin/bash?????????????????????????????????????????????????????????
+### BEGIN INIT INFO
+#Provides:?????? touchfile
+#Required-Start: $all （或者$network $remote_fs $syslog $time ）
+#Required-Stop:? $all （或者$network $remote_fs $syslog $time ）
+#Default-Start:? 2 3 4 5
+#Default-Stop:?? 0 1 6
+#Short-Description:? Run Touchfile
+#Description:??? Run Touchfile
+### END INIT INFO
+TOUCHFILE="/var/tmp/touch.file"
+case "$1" in
+?start)
+??? ??? ?echo "Creating $TOUCHFILE"
+?? ??? ?touch $TOUCHFILE
+?;;
+?stop)
+??? ??? ?echo "Removing $TOUCHFILE"
+?? ??? ?touch $TOUCHFILE
+?;;
+?restart)
+??? ??? ?echo "Recreating $TOUCHFILE"
+?? ??? ?rm $TOUCHFILE
+?? ??? ?touch $TOUCHFILE
+?;;
+?reload)
+??? ??? ?echo "Re-Touching $TOUCHFILE"
+?? ??? ?touch $TOUCHFILE
+?;;
+?*)
+??? ??? ?echo "Usage: touchfile.sh <start|stop|restart|reload>"
+?;;
+?esac
+?exit 0
+
+
+
+解释如下：
+INIT INFO描述了该脚本为哪个应用程序提供服务。还说明了运行该应用程序之前需要先运行其他什么应用程序，例如这里写的$all,表示该程序将在其他依赖程序都已经启动的情况下才启动。init脚本中最重要的描述可能就是Default-Start和Default-Stop，这里描述了该脚本在Linux系统中的运行级别，运行级别的定义如下：
+
+level 0：停机
+
+level 1 ：单用户
+
+level 2&3 ：多用户
+
+level 4 : 用户自定义
+
+level 5： 系统一般运行状态
+
+level 6：重启

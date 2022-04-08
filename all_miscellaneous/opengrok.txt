@@ -1,0 +1,68 @@
+tomcat8 opengrok1.3.16
+
+1、安装JDK1.8
+sudo apt install openjdk-8-jdk
+sudo update-alternatives --config java
+sudo update-alternatives --config javac
+
+2、下载universal-ctags源码编译出ctags二进制可执行文件
+git clone https://github.com/universal-ctags/ctags.git
+cd ctags
+./autogen.sh 
+./configure
+make
+
+
+3、下载tomcat  tar包解压
+http://tomcat.apache.org/
+tar zxf apache-tomcat-8.5.76.tar.gz
+
+
+4、下载解压OpenGrok tar包，得到apache-tomcat-8.5.76文件夹
+https://oracle.github.io/opengrok/
+tar zxf opengrok-1.3.16.tar.gz
+
+
+5、在apache-tomcat-8.5.76下创建三个目录etc data src
+mkdir opengrok-1.3.16/etc opengrok-1.3.16/data  opengrok-1.3.16/src
+etc目录下存放待会同步源码时产生的configuration.xml文件
+data目录下存放待会同步源码时产生的索引文件
+src下存放需要同步的源码文件，放源文件和软连接都行
+
+
+
+6、把OpenGrok作为webapp安装到tomcat
+cp opengrok-1.3.16/lib/source.war  apache-tomcat-8.5.76/webapps/
+启动tomcat
+apache-tomcat-8.5.76/bin/startup.sh
+浏览器打开一下127.0.0.1:8080看是否有tomcat欢迎界面
+然后再打开127.0.0.1:8080/source这个webapp,此时可以在apache-tomcat-8.5.76/webapps/
+下看到多了一个source文件夹，编辑里面的WEB-INF/web.xml配置文件，把
+ <context-param>属性里面的param-value属性改成待会同步源码时产生的configuration.xml文件的绝对路径加文件名
+然后关闭tomcat：apache-tomcat-8.5.76/bin/shutdown.sh
+
+7、将需要同步的文件以软连接放入opengrok-1.3.16/src
+ln -s ../../../rk3568/android11   rk3568
+
+8、构建脚本用于同步源码
+#!/bin/bash
+export OPENGROK_TOMCAT_BASE=/home/ghj/work/opengrok/apache-tomcat-8.5.76
+export OPENGROK_SRC_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/src
+export OPENGROK_DATA_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/data
+java \
+     -jar /home/ghj/work/opengrok/opengrok-1.3.16/lib/opengrok.jar \
+     -c /home/ghj/work/opengrok/universal_ctags/ctags \
+     -s /home/ghj/work/opengrok/opengrok-1.3.16/src \
+     -d /home/ghj/work/opengrok/opengrok-1.3.16/data -P -S \
+     -W /home/ghj/work/opengrok/opengrok-1.3.16/etc/configuration.xml
+
+
+9、构建脚本用于启动tomcat
+#!/bin/bash
+export OPENGROK_TOMCAT_BASE=/home/ghj/work/opengrok/apache-tomcat-8.5.76
+export OPENGROK_SRC_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/src
+export OPENGROK_DATA_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/data
+/home/ghj/work/opengrok/apache-tomcat-8.5.76/bin/startup.sh
+
+注，高版本组合例如tomcat9+opengrok最新版+jdk11可以设置如下环境变量指向configuration.xml
+OPENGROK_READ_XML_CONFIGURATION
