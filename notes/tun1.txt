@@ -1,0 +1,486 @@
+﻿#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <error.h>
+#include <net/route.h>
+ 
+int set_ifaddr(char *ifname, char *Ipaddr, char *mask,char *gateway)
+{
+    int fd;
+    int rc;
+    struct ifreq ifr; 
+    struct sockaddr_in *sin;
+    struct rtentry  rt;
+    
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if(fd < 0)
+        {
+            perror("socket   error");     
+            return -1;     
+        }
+    memset(&ifr,0,sizeof(ifr)); 
+    strcpy(ifr.ifr_name,ifname); 
+    sin = (struct sockaddr_in*)&ifr.ifr_addr;     
+    sin->sin_family = AF_INET;     
+    //ipaddr
+    if(inet_aton(Ipaddr,&(sin->sin_addr)) < 0)   
+    {     
+        perror("inet_aton   error");     
+        return -2;     
+    }    
+    
+    if(ioctl(fd,SIOCSIFADDR,&ifr) < 0)   
+    {     
+        perror("ioctl   SIOCSIFADDR   error");     
+        return -3;     
+    }
+    //netmask
+    if(inet_aton(mask,&(sin->sin_addr)) < 0)   
+    {     
+        perror("inet_pton   error");     
+        return -4;     
+    }    
+    if(ioctl(fd, SIOCSIFNETMASK, &ifr) < 0)
+    {
+        perror("ioctl");
+        return -5;
+    }
+    //gateway
+    memset(&rt, 0, sizeof(struct rtentry));
+    memset(sin, 0, sizeof(struct sockaddr_in));
+    sin->sin_family = AF_INET;
+    sin->sin_port = 0;
+    if(inet_aton(gateway, &sin->sin_addr)<0)
+    {
+       printf ( "inet_aton error\n" );
+    }
+    memcpy ( &rt.rt_gateway, sin, sizeof(struct sockaddr_in));
+    ((struct sockaddr_in *)&rt.rt_dst)->sin_family=AF_INET;
+    ((struct sockaddr_in *)&rt.rt_genmask)->sin_family=AF_INET;
+    rt.rt_flags = RTF_GATEWAY;
+    if (ioctl(fd, SIOCADDRT, &rt)<0)
+    {
+        zError( "ioctl(SIOCADDRT) error in set_default_route\n");
+        close(fd);
+        return -1;
+    }
+    close(fd);
+    return rc;
+}
+
+二。对涉及的知识点进行补充
+
+1.struct ifreq {
+    char ifr_name[IFNAMSIZ];
+     union
+      {
+        struct sockaddr ifru_addr;
+        struct sockaddr ifru_dstaddr;
+        struct sockaddr ifru_broadaddr;
+        struct sockaddr ifru_netmask;
+        struct sockaddr ifru_hwaddr;
+        short int ifru_flags;
+        int ifru_ivalue;
+        int ifru_mtu;
+        struct ifmap ifru_map;
+        char ifru_slave[IFNAMSIZ]; /* Just fits the size */
+        char ifru_newname[IFNAMSIZ];
+        __caddr_t ifru_data;
+      } ifr_ifru;
+};
+
+# define ifr_name ifr_ifrn.ifrn_name /* interface name */
+# define ifr_hwaddr ifr_ifru.ifru_hwaddr /* MAC address */
+# define ifr_addr ifr_ifru.ifru_addr /* address */
+# define ifr_dstaddr ifr_ifru.ifru_dstaddr /* other end of p-p lnk */
+# define ifr_broadaddr ifr_ifru.ifru_broadaddr /* broadcast address */
+# define ifr_netmask ifr_ifru.ifru_netmask /* interface net mask */
+# define ifr_flags ifr_ifru.ifru_flags /* flags */
+# define ifr_metric ifr_ifru.ifru_ivalue /* metric */
+# define ifr_mtu ifr_ifru.ifru_mtu /* mtu */
+# define ifr_map ifr_ifru.ifru_map /* device map */
+# define ifr_slave ifr_ifru.ifru_slave /* slave device */
+# define ifr_data ifr_ifru.ifru_data /* for use by interface */
+# define ifr_ifindex ifr_ifru.ifru_ivalue /* interface index */
+# define ifr_bandwidth ifr_ifru.ifru_ivalue /* link bandwidth */
+# define ifr_qlen ifr_ifru.ifru_ivalue /* queue length */
+# define ifr_newname ifr_ifru.ifru_newname /* New name */
+# define _IOT_ifreq _IOT(_IOTS(char),IFNAMSIZ,_IOTS(char),16,0,0)
+# define _IOT_ifreq_short _IOT(_IOTS(char),IFNAMSIZ,_IOTS(short),1,0,0)
+# define _IOT_ifreq_int _IOT(_IOTS(char),IFNAMSIZ,_IOTS(int),1,0,0)
+
+
+2.ioctl 函数 (在网络中的作用)
+关于这个网络相关的请求，就是ioctl在这里面起的作用和各个参数的作用。。。可以参照这个网页,讲解的很详细：
+http://www.iteye.com/topic/309442
+本例中用的2个ioctl控制函数。。上面已经解释很清楚了
+
+3.关于socketaddr_in和socketaddr的关系，下面贴出具体的定义：
+struct sockaddr_in 
+{ 
+short int sin_family; /* 地址族 */ 
+unsigned short int sin_port; /* 端口号 */ 
+struct in_addr sin_addr; /* IP地址 */ 
+unsigned char sin_zero[8]; /* 填充0 以保持与struct sockaddr同样大小 */ 
+};
+
+struct sockaddr 
+{ 
+unsigned short sa_family; /* 地址族， AF_xxx */ 
+char sa_data[14]; /* 14 字节的协议地址 */ 
+};
+
+比较一下，会发现长度一样，所以这2个可以通用的，不过要进行类型转换，比较一下就得出了为什么上面程序中可以用：
+(unsigned char)ifreq.ifr_addr.sa_data[2],这种形式了，还是解释一下吧：这个ifr_addr是一个struct sockaddr结构体。它其中的sa_date[2]是不是照着上面sockaddr_in中的sin_add(也就是ip地址呢)。
+
+/**
+ *  linux TUN 例子 代码来至
+ *  http://hi.baidu.com/zkheartboy/blog/item/e96acf33508e4a40ad4b5f88.html和
+ *  http://blog.csdn.net/Z_man/archive/2009/05/26/4216530.aspx
+ *  建立一个tun0的虚拟网卡进行通信，程序关闭后将消失。
+ *  ping 10.0.0.1
+ *  Documentation/networking/tuntap.txt
+ *  br_select.c bridge based on select system call.
+ *  br_sigio.c  bridge based on async io and SIGIO signal.
+ *  http://hi.baidu.com/zkheartboy/blog/item/e96acf33508e4a40ad4b5f88.html
+ *  http://blogold.chinaunix.net/u3/114446/showart_2245279.html
+ *  http://www.ibm.com/developerworks/cn/linux/l-tuntap/index.html
+ */
+
+[cpp] view plaincopy
+#include   
+#include   
+#include   
+#include   
+#include   
+#include   
+#include   
+#include   
+#include   
+#include   
+  
+/** 
+ *  激活接口 
+ */  
+int interface_up(char *interface_name)  
+{  
+    int s;  
+  
+    if((s = socket(PF_INET,SOCK_STREAM,0)) < 0)  
+    {  
+        printf("Error create socket :%m/n", errno);  
+        return -1;  
+    }  
+  
+    struct ifreq ifr;  
+    strcpy(ifr.ifr_name,interface_name);  
+  
+    short flag;  
+    flag = IFF_UP;  
+    if(ioctl(s, SIOCGIFFLAGS, &ifr) < 0)  
+    {  
+        printf("Error up %s :%m/n",interface_name, errno);  
+        return -1;  
+    }  
+  
+    ifr.ifr_ifru.ifru_flags |= flag;  
+  
+    if(ioctl(s, SIOCSIFFLAGS, &ifr) < 0)  
+    {  
+        printf("Error up %s :%m/n",interface_name, errno);  
+        return -1;  
+    }  
+  
+    return 0;  
+  
+}  
+  
+#include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <net/if.h>
+#include <error.h>
+#include <net/route.h>
+?
+int set_ifaddr(char *ifname, char *Ipaddr, char *mask,char *gateway)
+{
+??? int fd;
+??? int rc;
+??? struct ifreq ifr;?
+??? struct sockaddr_in *sin;
+??? struct rtentry? rt;
+????
+??? fd = socket(AF_INET, SOCK_DGRAM, 0);
+??? if(fd < 0)
+??????? {
+??????????? perror("socket?? error");?????
+??????????? return -1;?????
+??????? }
+??? memset(&ifr,0,sizeof(ifr));?
+??? strcpy(ifr.ifr_name,ifname);?
+??? sin = (struct sockaddr_in*)&ifr.ifr_addr;?????
+??? sin->sin_family = AF_INET;?????
+??? //ipaddr
+??? if(inet_aton(Ipaddr,&(sin->sin_addr)) < 0)???
+??? {?????
+??????? perror("inet_aton?? error");?????
+??????? return -2;?????
+??? }????
+????
+??? if(ioctl(fd,SIOCSIFADDR,&ifr) < 0)???
+??? {?????
+??????? perror("ioctl?? SIOCSIFADDR?? error");?????
+??????? return -3;?????
+??? }
+??? //netmask
+??? if(inet_aton(mask,&(sin->sin_addr)) < 0)???
+??? {?????
+??????? perror("inet_pton?? error");?????
+??????? return -4;?????
+??? }????
+??? if(ioctl(fd, SIOCSIFNETMASK, &ifr) < 0)
+??? {
+??????? perror("ioctl");
+??????? return -5;
+??? }
+??? //gateway
+??? memset(&rt, 0, sizeof(struct rtentry));
+??? memset(sin, 0, sizeof(struct sockaddr_in));
+??? sin->sin_family = AF_INET;
+??? sin->sin_port = 0;
+??? if(inet_aton(gateway, &sin->sin_addr)<0)
+??? {
+?????? printf ( "inet_aton error\n" );
+??? }
+??? memcpy ( &rt.rt_gateway, sin, sizeof(struct sockaddr_in));
+??? ((struct sockaddr_in *)&rt.rt_dst)->sin_family=AF_INET;
+??? ((struct sockaddr_in *)&rt.rt_genmask)->sin_family=AF_INET;
+??? rt.rt_flags = RTF_GATEWAY;
+??? if (ioctl(fd, SIOCADDRT, &rt)<0)
+??? {
+??????? zError( "ioctl(SIOCADDRT) error in set_default_route\n");
+??????? close(fd);
+??????? return -1;
+??? }
+??? close(fd);
+??? return rc;
+}
+
+二。对涉及的知识点进行补充
+
+1.struct ifreq {
+??? char ifr_name[IFNAMSIZ];
+???? union
+????? {
+??????? struct sockaddr ifru_addr;
+??????? struct sockaddr ifru_dstaddr;
+??????? struct sockaddr ifru_broadaddr;
+??????? struct sockaddr ifru_netmask;
+??????? struct sockaddr ifru_hwaddr;
+??????? short int ifru_flags;
+??????? int ifru_ivalue;
+??????? int ifru_mtu;
+??????? struct ifmap ifru_map;
+??????? char ifru_slave[IFNAMSIZ]; /* Just fits the size */
+??????? char ifru_newname[IFNAMSIZ];
+??????? __caddr_t ifru_data;
+????? } ifr_ifru;
+};
+
+# define ifr_name ifr_ifrn.ifrn_name /* interface name */
+# define ifr_hwaddr ifr_ifru.ifru_hwaddr /* MAC address */
+# define ifr_addr ifr_ifru.ifru_addr /* address */
+# define ifr_dstaddr ifr_ifru.ifru_dstaddr /* other end of p-p lnk */
+# define ifr_broadaddr ifr_ifru.ifru_broadaddr /* broadcast address */
+# define ifr_netmask ifr_ifru.ifru_netmask /* interface net mask */
+# define ifr_flags ifr_ifru.ifru_flags /* flags */
+# define ifr_metric ifr_ifru.ifru_ivalue /* metric */
+# define ifr_mtu ifr_ifru.ifru_mtu /* mtu */
+# define ifr_map ifr_ifru.ifru_map /* device map */
+# define ifr_slave ifr_ifru.ifru_slave /* slave device */
+# define ifr_data ifr_ifru.ifru_data /* for use by interface */
+# define ifr_ifindex ifr_ifru.ifru_ivalue /* interface index */
+# define ifr_bandwidth ifr_ifru.ifru_ivalue /* link bandwidth */
+# define ifr_qlen ifr_ifru.ifru_ivalue /* queue length */
+# define ifr_newname ifr_ifru.ifru_newname /* New name */
+# define _IOT_ifreq _IOT(_IOTS(char),IFNAMSIZ,_IOTS(char),16,0,0)
+# define _IOT_ifreq_short _IOT(_IOTS(char),IFNAMSIZ,_IOTS(short),1,0,0)
+# define _IOT_ifreq_int _IOT(_IOTS(char),IFNAMSIZ,_IOTS(int),1,0,0)
+
+
+2.ioctl 函数 (在网络中的作用)
+关于这个网络相关的请求，就是ioctl在这里面起的作用和各个参数的作用。。。可以参照这个网页,讲解的很详细：
+http://www.iteye.com/topic/309442
+本例中用的2个ioctl控制函数。。上面已经解释很清楚了
+
+3.关于socketaddr_in和socketaddr的关系，下面贴出具体的定义：
+struct sockaddr_in?
+{?
+short int sin_family; /* 地址族 */?
+unsigned short int sin_port; /* 端口号 */?
+struct in_addr sin_addr; /* IP地址 */?
+unsigned char sin_zero[8]; /* 填充0 以保持与struct sockaddr同样大小 */?
+};
+
+struct sockaddr?
+{?
+unsigned short sa_family; /* 地址族， AF_xxx */?
+char sa_data[14]; /* 14 字节的协议地址 */?
+};
+
+比较一下，会发现长度一样，所以这2个可以通用的，不过要进行类型转换，比较一下就得出了为什么上面程序中可以用：
+(unsigned char)ifreq.ifr_addr.sa_data[2],这种形式了，还是解释一下吧：这个ifr_addr是一个struct sockaddr结构体。它其中的sa_date[2]是不是照着上面sockaddr_in中的sin_add(也就是ip地址呢)。
+
+
+————————————————
+版权声明：本文为CSDN博主「zhengyuquan」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/zhengyuquan/article/details/9620979
+
+/** 
+ *  设置接口ip地址 
+ */  
+int set_ipaddr(char *interface_name, char *ip)  
+{  
+    int s;  
+  
+    if((s = socket(PF_INET, SOCK_STREAM, 0)) < 0)  
+    {  
+        printf("Error up %s :%m/n",interface_name, errno);  
+        return -1;  
+    }  
+  
+    struct ifreq ifr;  
+    strcpy(ifr.ifr_name, interface_name);  
+  
+    struct sockaddr_in addr;  
+    bzero(&addr, sizeof(struct sockaddr_in));  
+    addr.sin_family = PF_INET;  
+    inet_aton(ip, &addr.sin_addr);  
+  
+    memcpy(&ifr.ifr_ifru.ifru_addr, &addr, sizeof(struct sockaddr_in));  
+  
+    if(ioctl(s, SIOCSIFADDR, &ifr) < 0)  
+    {  
+        printf("Error set %s ip :%m/n",interface_name, errno);  
+        return -1;  
+    }  
+  
+    return 0;  
+}  
+  
+/** 
+ *  创建接口 
+ */  
+int tun_create(char *dev, int flags)  
+{  
+    struct ifreq ifr;  
+    int fd, err;  
+  
+    if ((fd = open("/dev/net/tun", O_RDWR)) < 0)  
+    {  
+        printf("Error :%m/n", errno);  
+        return -1;  
+    }  
+  
+    memset(&ifr, 0, sizeof(ifr));  
+    ifr.ifr_flags |= flags;  
+  
+    if (*dev != '/0')  
+    {  
+        strncpy(ifr.ifr_name, dev, IFNAMSIZ);  
+    }  
+  
+    if ((err = ioctl(fd, TUNSETIFF, (void *)&ifr)) < 0)   
+    {  
+        printf("Error :%m/n", errno);  
+        close(fd);  
+        return -1;  
+    }  
+  
+    strcpy(dev, ifr.ifr_name);  
+  
+    return fd;  
+}  
+  
+/** 
+ *  增加到10.0.0.1的路由 
+ *  同命令:route add 10.0.0.1 dev tun0 
+ */  
+int route_add(char * interface_name)  
+{  
+    int skfd;  
+    struct rtentry rt;  
+  
+    struct sockaddr_in dst;  
+    struct sockaddr_in gw;  
+    struct sockaddr_in genmask;  
+  
+    memset(&rt, 0, sizeof(rt));  
+  
+    genmask.sin_addr.s_addr = inet_addr("255.255.255.255");  
+  
+    bzero(&dst,sizeof(struct sockaddr_in));  
+    dst.sin_family = PF_INET;  
+    dst.sin_addr.s_addr = inet_addr("10.0.0.1");  
+  
+    rt.rt_metric = 0;  
+    rt.rt_dst = *(struct sockaddr*) &dst;  
+    rt.rt_genmask = *(struct sockaddr*) &genmask;  
+  
+    rt.rt_dev = interface_name;  
+    rt.rt_flags = RTF_UP | RTF_HOST ;  
+  
+    skfd = socket(AF_INET, SOCK_DGRAM, 0);  
+    if(ioctl(skfd, SIOCADDRT, &rt) < 0)   
+    {  
+        printf("Error route add :%m/n", errno);  
+        return -1;  
+    }  
+}  
+int main(int argc, char *argv[])  
+{  
+    int tun, ret;  
+    char tun_name[IFNAMSIZ];  
+    unsigned char buf[4096];  
+    unsigned char ip[4];  
+  
+    tun_name[0] = '/0';  
+    tun = tun_create(tun_name, IFF_TUN | IFF_NO_PI);  
+    if (tun < 0)   
+    {  
+        return 1;  
+    }  
+    printf("TUN name is %s/n", tun_name);  
+  
+    //激活虚拟网卡增加到虚拟网卡的路由  
+    interface_up(tun_name);  
+    route_add(tun_name);  
+  
+    while (1) {  
+  
+        ret = read(tun, buf, sizeof(buf));  
+        printf("read %d bytes/n", ret);  
+        int i;  
+        for(i=0;i
+        {  
+          printf("%02x ",buf[i]);  
+        }  
+        printf("/n");  
+        if (ret < 0)  
+            break;  
+        memcpy(ip, &buf[12], 4);  
+        memcpy(&buf[12], &buf[16], 4);  
+        memcpy(&buf[16], ip, 4);  
+        buf[20] = 0;  
+        *((unsigned short*)&buf[22]) += 8;  
+        ret = write(tun, buf, ret);  
+        printf("write %d bytes/n", ret);  
+    }  
+  
+    return 0;  
+} 

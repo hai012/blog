@@ -1,0 +1,119 @@
+HEAD指向的版本就是当前版本，因此，Git允许我们在版本的历史之间穿梭，使用命令git reset --hard commit_id/HEAD^。
+
+穿梭前，用git log可以查看提交历史，以便确定要回退到哪个版本。
+
+要重返未来，用git reflog查看命令历史，以便确定要回到未来的哪个版本。
+
+某个被修改的文件未被add之前撤销对该文件的更改：
+git checkout -- <file>
+命令git checkout -- readme.txt意思就是，把readme.txt文件在工作区的修改全部撤销，这里有两种情况：
+一种是readme.txt自修改后还没有被放到暂存区，现在，撤销修改就回到和版本库一模一样的状态；
+一种是readme.txt已经添加到暂存区后，又作了修改，现在，撤销修改就回到添加到暂存区后的状态。
+总之，就是让这个文件回到最近一次git commit或git add时的状态。
+
+
+某个被修改的文件后被add之后未commit之前撤销对该文件的更改：
+git reset HEAD <file>可以把暂存区的修改撤销掉（unstage），使用HEAD中的<file替代>：
+之后再使用git checkout -- <file>更新工作区。
+
+新版本git:
+从暂存区恢复工作区，
+git resotre --worktree readme.txt
+从master恢复暂存区 
+git restore --staged readme.txt
+从master同时恢复工作区和暂存区
+git restore --source=HEAD --staged --worktree readme.txt
+
+
+1. rm <file> 可以在任何文件夹都可以用，包括不是git仓库的地方，是用来删除文件。如果用在git仓库里，则可以视为删除工作区的文件。
+2. git rm <file> 只能在git仓库里使用，是用来删除**[工作区+暂存区]**的文件用的。如果在git仓库外使用就会报错。
+3. git rm --cached <file> 如果想仅删除暂存区里的文件可以用此命令，它不会删除工作区中的文件。
+4. 如果想删除HEAD仓库里的文件，好像没有专门的命令，只能commit作log。具体操作是：rm→add→commit 或 git rm→commit。
+
+
+要关联一个远程库，使用命令git remote add <name> git@server-name:path/repo-name.git；
+关联后，使用命令git push -u <name> master第一次推送master分支的所有内容；
+此后，每次本地提交后，只要有必要，就可以使用命令git push <name> master推送最新修改；
+git pull <name> master从远程获取镜像并与本地master合并
+如果添加的时候地址写错了，或者就是想删除远程库，可以用git remote rm <name>命令。
+使用前，建议先用git remote -v查看远程库信息
+<name>是在本地称呼远程库的一个标签
+
+本地git init add commit
+建立未初始化的远程仓库
+git remote add <name> git@server-name:path/repo-name.git；
+git push -u <name> master第一次将本地内容推向远程
+远程仓库更新后使用git pull <name> master 先fetch再merge实现本地master更新
+本地仓库更新后使用git push <name> master实现远程master更新
+
+
+创建已经初始化的远程仓库   或   对于已经存在文件的项目
+git clone git@server-name:path/repo-name.git
+cd repo-name进行编辑
+
+
+
+
+查看分支信息
+git branch
+创建分支
+git branch <branch_name>
+切换分支
+git checkout <branch_name>
+git switch <branch_name>
+创建并切换分支
+git checkout  -b  <branch_name>
+git switch      -c  <branch_name>
+Fast forward模式合并<branch_name>到当前分支
+git merge <branch_name>
+非Fast forward模式合并<branch_name>到当前分支                                                
+git merge --no-ff -m "description" <branch_name>
+merge后   删除分支
+git branch -d <branch_name>
+merge前  删除分支
+git branch -D <branch_name>
+
+保存工作区
+git stash
+查看已保存的工作区列表
+git stash list
+用git stash apply恢复，但是恢复后，stash内容并不删除，你需要用git stash drop来删除
+git stash pop，恢复的同时把stash内容也删了
+
+
+
+A分支B分支上都存在同样的bug
+在A分支创建bug分支，并在bug分支上修复的bug，返回A分支合并bug分支后,
+想要修复当前B分支上的bug，可以在B分支上用git cherry-pick <bug分支commit时的ID>命令，
+把bug提交的修改“复制”到当前分支，避免重复劳动
+stash pop（即恢复之前的工作现场），不要着急进行checkout-pick<commit-id>，
+应该在此处先进行一次提交（即在恢复现场以后首先应该先进行一次提交以保证恢复的现场得以保存），
+在进行checkout-pick就没问题了。猜测git cherry-pick时需要工作区clean
+
+
+因此，多人协作的工作模式通常是这样：
+
+首先，可以试图用git push origin <branch-name>推送自己的修改；
+
+如果推送失败，则因为远程分支比你的本地更新，需要先用git pull试图合并；
+
+如果合并有冲突，则解决冲突，并在本地提交；
+
+没有冲突或者解决掉冲突后，再用git push origin <branch-name>推送就能成功！
+
+如果git pull提示no tracking information，则说明本地分支和远程分支的链接关系没有创建，用命令git branch --set-upstream-to <branch-name> origin/<branch-name>。
+
+这就是多人协作的工作模式，一旦熟悉了，就非常简单。
+
+小结
+查看远程库信息，使用git remote -v；
+
+本地新建的分支如果不推送到远程，对其他人就是不可见的；
+
+从本地推送分支，使用git push origin branch-name，如果推送失败，先用git pull抓取远程的新提交；
+
+在本地创建和远程分支对应的分支，使用git checkout -b branch-name origin/branch-name，本地和远程分支的名称最好一致；
+
+建立本地分支和远程分支的关联，使用git branch --set-upstream branch-name origin/branch-name；
+
+从远程抓取分支，使用git pull，如果有冲突，要先处理冲突。

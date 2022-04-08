@@ -1,0 +1,54 @@
+以ghj身份创建/home/ghj/nfsShared文件夹
+
+安装：
+apt install nfs-kernel-server
+
+配置权限vim  /etc/exports
+/home/ghj/nfsShared *(rw,async,insecure,no_subtree,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+/home/ghj    *(insecure,rw,sync,no_subtree_check,all_squash,root_squash,anonuid=1000,anongid=1000)
+
+sudo exportfs -r
+nfs共涉及6个端口：
+111、2049以及剩下四个不固定的，可通过以下配置固定下来
+vim /etc/default/nfs-kernel-server :
+
+	RPCMOUNTDOPTS="--manage-gids --port 30003"
+
+vim /etc/default/nfs-common:
+
+	STATDOPTS="--port 30001 --outgoing-port 30002"
+
+vim /etc/modprobe.d/lockd.conf:
+
+	options lockd nlm_tcpport=30000
+	options lockd nlm_udpport=30000
+
+
+
+
+
+启动/重启停止/开机自启/关闭开机自启
+systemctl  start/restart/stop/enable/disable  nfs-kernel-server
+
+
+windows下连接nfs:
+打开控制面板 > 程序 > 启用或关闭 Windows 功能，找到NFS服务打开子目录勾选NFS客户端与管理工具。
+NFS客户端：通过界面操作挂在NFS
+管理工具：通过命令行挂在NFS
+开启wndows以读写权限访问nfs:
+需要读写权限的需要修改注册表
+通过修改注册表将windows访问NFS时的UID和GID改成0即可，步骤如下
+1、在运行中输入regedit，打开注册表编辑器；
+2、进入HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\ClientForNFS\CurrentVersion\Default条目；
+3、选择新建----QWORD值，新建AnonymousUid，AnonymousGid两个值，值为0；
+4、重启电脑 注册表才会生效；
+
+
+环境：Win7虚机寄宿在CentOS/Mac中并共享宿主机的文件夹。每当在Win7中下载一个文件file_name.extention到这个共享文件夹，就会自动生成一个file_name.extention:Zone.Identifier格式的文件，这个文件可以删掉没啥影响，文件内容如下格式：
+
+
+
+这个附属的文件就是为了描述对应文件的元信息（alternative data stream，ADS） - 来源，比如本地，内网，外网等，这个ZoneId 3应该表示来自互联网 - 然并卵，看着就烦。
+
+
+配置：Win+R-->gpedit.msc-->User Configuration-->Administrative Templates-->Windows Components-->Attachment Manager-->"Do not preserve zone information in file attachments"-->Enabled-->OK，如下图（复制图片地址在浏览器中打开查看大图）：
