@@ -2282,11 +2282,121 @@ handleMessage方法前面已经提及过，但这里由于Message是SM_INIT_CMD�
 
 ![image-20220329140223451](wifi.assets/image-20220329140223451.png)
 
-ClientModeStateMachine.IdleState.processMessage(Message message)调用了WifiNative.setupInterfaceForClientInScanMode()方法，该方法十分关键，见后续章节分析。接着调用transitionTo(mScanOnlyModeState)切换到ScanOnlyModeState状态。最终返回HANDLED说明Message已经被处理。返回到handleMessage中调完processMsg后继续调用performTransitions(State msgProcessedState, Message msg)，由于进行了状态切换，因此在performTransitions中会调到invokeExitMethods(commonStateInfo)和invokeEnterMethods(stateStackEnteringIndex)。由于状态树层次关系，invokeExitMethods这里相当于什么也没做，invokeEnterMethods调用了ScanOnlyModeState.enter()。然后一路返回继续监听MessageQueue，Message(CMD_START)处理完毕。
+ClientModeStateMachine.IdleState.processMessage(Message message)调用了WifiNative.setupInterfaceForClientInScanMode()方法，该方法十分关键，见后续章节分析。接着调用transitionTo(mScanOnlyModeState)切换到ScanOnlyModeState状态。最终返回HANDLED说明Message已经被处理。返回到handleMessage中调完processMsg后继续调用performTransitions(State msgProcessedState, Message msg)，由于进行了状态切换，因此在performTransitions中会调到invokeExitMethods(commonStateInfo)和invokeEnterMethods(stateStackEnteringIndex)。由于状态树层次关系，invokeExitMethods这里相当于什么也没做，**invokeEnterMethods调用了ScanOnlyModeState.enter()**。然后一路返回继续监听MessageQueue，Message(CMD_START)处理完毕。
 
 
 
-##### 3、switchClientModeManagerRole(manager)
+##### 3、ClientModeStateMachine.ScanOnlyModeState.enter()
+
+这个方法最终向WifiScanningServiceImpl.WifiSingleScanStateMachine发送了一个Message(CMD_ENABLE)，用来使能扫描控制状态机。
+
+![image-20220408093858763](wifi.assets/image-20220408093858763.png)
+
+##### 4、 AsyncChannel.sendMessage
+
+AsyncChannel.sendMessage如下：
+
+![image-20220408103921627](wifi.assets/image-20220408103921627.png)
+
+调用重载的sendMessage方法：
+
+![image-20220408104041600](wifi.assets/image-20220408104041600.png)
+
+显然消息发往何处取决于mAsyncChannel对象内部Messenger类型的mDestMessenger对象被赋了什么值，mAsyncChannel是mWifiScanner对象的内部类，查看WifiScanner构造函数：
+
+![image-20220408105937391](wifi.assets/image-20220408105937391.png)
+
+AsyncChannel.connect如下：
+
+![image-20220408105347864](wifi.assets/image-20220408105347864.png)
+
+AsyncChannel.connect如下：
+
+![image-20220408105418760](wifi.assets/image-20220408105418760.png)
+
+真相大白，mDestMessenger对象通过mWifiScanner对象构造时传入的IWifiScanner接口对象的getMessenger()方法获得。这个传入的IWifiScanner接口的对象其实是一个BpWifiScanningServiceImpl代理对象，通过AIDL与BnWifiScanningServiceImpl服务实现对象进行通信，他们都实现了IWifiScanner接口。BnWifiScanningServiceImpl.getMessenger如下：
+
+![image-20220408112847891](wifi.assets/image-20220408112847891.png)
+
+**Messenger本身是一个AIDL interface，这里new 出了一个Messenger实现端，然后返回，在WifiScanner构造函数使用mService.getMessenger()其实就是使用代BpWifiScanningServiceImpl代理对象的getMessenger方法获得一个Messenger的代理对象，这个Messenger的代理对象的实现端在BnWifiScanningServiceImpl所在的进程中，且这个实现端构造时传入了一个ClientHandler类型的对象。ClientHandler是WifiScanningServiceImpl的内部类，ClientHandler继承自WifiHandler，WifiHandler继承Handler，ClientHandler重写了handleMessage(Message msg)方法。**
+
+**根据Messenger的特性，当AsynChanel.sendMessage(CMD_ENABLE)发送Message(CMD_ENABLE)后，在ClientHandler的Looper所在线程中将调用ClientHandler的重写的handleMessage(Message msg)来处理消息：**  
+
+frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java
+
+```
+84     public class WifiScanningServiceImpl extends IWifiScanner.Stub {
+......
+246      private class ClientHandler extends WifiHandler {
+......
+252          @Override
+253          public void handleMessage(Message msg) {
+......
+328              switch (msg.what) {
+329                  case WifiScanner.CMD_ENABLE:
+330                      Log.i(TAG, "Received a request to enable scanning, UID = " + msg.sendingUid);
+331                      setupScannerImpls();
+332                      mBackgroundScanStateMachine.sendMessage(Message.obtain(msg));
+333                      mSingleScanStateMachine.sendMessage(Message.obtain(msg));
+334                      mPnoScanStateMachine.sendMessage(Message.obtain(msg));
+335                      break;
+......
+367              }
+368          }
+369      }
+```
+
+其中关键的是**setupScannerImpls()和mSingleScanStateMachine.sendMessage(Message.obtain(msg));**
+
+##### 5、 WifiScanningServiceImpl.setupScannerImpls()
+
+![image-20220408170731289](wifi.assets/image-20220408170731289.png)
+
+这个方法使用mScannerImplFactory.create创建一个WifiScannerImpl接口的对象，然后把这个对象放入mScannerImpls中，看WifiScanningServiceImpl的构造：
+
+![image-20220408171031438](wifi.assets/image-20220408171031438.png)
+
+frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WifiScanningService.java
+
+![image-20220408171112113](wifi.assets/image-20220408171112113.png)
+
+显然mScannerImplFactory是WifiScannerImpl.DEFAULT_FACTORY，再看WifiScannerImpl.DEFAULT_FACTORY：
+
+![image-20220408171336303](wifi.assets/image-20220408171336303.png)
+
+暂且不论wifiNative.getBgScanCapabilities返回的是true还是false，HalWifiScannerImpl其实是对WificondScannerImpl对象的一个封装，即后续调用HalWifiScannerImpl对象的一些方法时其实都是通过HalWifiScannerImpl对象内部的一个WificondScannerImpl对象完成的，HalWifiScannerImpl和WificondScannerImpl都继承WifiScannerImpl抽象类。**因此，后续进行扫描时，从mScannerImpls取出的WifiScannerImpl类的子对象可以认为就是WificondScannerImpl对象。**
+
+
+
+
+
+WifiSingleScanStateMachine收到Message(CMD_ENABLE)后从初始的DefaultState切换成了IdleState，注意，由于刚开始没有PendingScans,因此在IdleState.enter()中调用tryToStartNewScan时该方法直接return，与后续在扫描AP时不同。
+
+
+
+##### 6、mSingleScanStateMachine.sendMessage(Message.obtain(msg));
+
+WifiSingleScanStateMachine在构造初始化后处于DefaultState ，因此在这里处理Message(CMD_ENABLE):
+
+![image-20220408172714499](wifi.assets/image-20220408172714499.png)
+
+处理很简单，直接切换到IdleState，根据层次状态机原理以及IdleState与DefaultState的层次关系，当调完DefaultState.processMessage(Message msg)后由于状态发送了变化会调用到IdleState.enter()：
+
+![image-20220408172954103](wifi.assets/image-20220408172954103.png)
+
+IdleState.enter()直接调用WifiScanningServiceImpl.tryToStartNewScan()：
+
+![image-20220408173140541](wifi.assets/image-20220408173140541.png)
+
+由于mPendingScans.size() == 0，因此直接返回。
+
+
+
+
+
+
+
+##### 7、switchClientModeManagerRole(manager)
 
 在startClientModeManager()中调用到了ActiveModeWarden.switchClientModeManagerRole(@NonNull ClientModeManager modeManager)：
 
@@ -2310,11 +2420,9 @@ ClientModeStateMachine.IdleState.processMessage(Message message)调用了WifiNat
 
 
 
-##### 4、关闭wifi
+##### 8、关闭wifi
 
-在ClientModeManager的构造器除了把looper作为参数new了一个ClientModeStateMachine外还new了一个DeferStopHandler对象，DeferStopHandler派生自
-
- WifiHandler， WifiHandler继承自Handler，ClientModeStateMachine继承自StateMachine，StateMachine的内部类SmHandler继承自Handler，显然looper的HandlerThread处理线程将同时处理DeferStopHandler和SmHandler这两个Handler发过来的消息。
+在ClientModeManager的构造器除了把looper作为参数new了一个ClientModeStateMachine外还new了一个DeferStopHandler对象，DeferStopHandler派生自WifiHandler， WifiHandler继承自Handler，ClientModeStateMachine继承自StateMachine，StateMachine的内部类SmHandler继承自Handler，显然looper的HandlerThread处理线程将同时处理DeferStopHandler和SmHandler这两个Handler发过来的消息。
 
 DeferStopHandler最终调用continueToStopWifi()来关闭wifi。
 
@@ -2328,9 +2436,11 @@ DeferStopHandler最终调用continueToStopWifi()来关闭wifi。
 
 根据前面章节分析，ClientModeStateMachine层次状态机处理Message(CMD_START)的过程中会调用WifiNative.setupInterfaceForClientInScanMode（）方法
 
-setupInterfaceForClientInScanMode(@NonNull InterfaceCallback interfaceCallback)
+![image-20220408181731764](wifi.assets/image-20220408181731764.png)
 
 
+
+##### 1、startHal()
 
 装载驱动，启动wpa_supplicant ，添加wpa_supplicant interface，获取驱动/模组信息，初始化成scan模式，wlan0 up
 
@@ -2373,7 +2483,29 @@ wifi_load_driver_ext
 
 
 
-#### 6.1.5 setupInterfaceForClientInScanMode()
+##### 2、startSupplicant()
+
+
+
+##### 3、mIfaceMgr.allocateIface
+
+
+
+##### 4、createStaIface(iface)
+
+
+
+##### 5、mWifiCondManager.setupInterfaceForClientMode
+
+
+
+
+
+
+
+
+
+#### 6.1.5 switchClientInterfaceToConnectivityMode()
 
 根据前面章节分析，ClientModeStateMachine层次状态机处理Message(CMD_SWITCH_TO_CONNECT_MODE)的过程中会调用WifiNative.switchClientInterfaceToConnectivityMode(@NonNull String ifaceName)方法
 
@@ -2432,25 +2564,147 @@ BlockingRunnable.postAndWait(Handler handler, long timeout)方法首先使用han
 
 #### 6.2.2 ScanRequestProxy.startScan(int callingUid, String packageName)
 
-经过前面的分析，A匿名对象的run()方法就是调用ScanRequestProxy.startScan(callingUid, packageName)，其实现如下
+经过前面的分析，A匿名对象的run()方法就是调用ScanRequestProxy.startScan(callingUid, packageName)，其实现如下：
+
+![image-20220408103329192](wifi.assets/image-20220408103329192.png)
+
+主要调用了WifiScanner.startScan:
+
+![image-20220408103505251](wifi.assets/image-20220408103505251.png)
+
+#### 6.2.3 WifiScanningServiceImpl.WifiSingleScanStateMachine
+
+根据在打开wifi过程中对AsyncChanel的分析，将由某个线程从looper队列中把Message(CMD_START_SINGLE_SCAN)取出，然后调用到WifiScanningServiceImpl.ClientHandler.handleMessage(Message msg)来处理消息，ClientHandler的重写的handleMessage在处理Message(CMD_START_SINGLE_SCAN)时直接将其发送给了WifiScanningServiceImpl内部的WifiSingleScanStateMachine，WifiSingleScanStateMachine根据前面打开wifi流程的分析，现在处于IdleState，IdleState.processMessage无法处理，因此由其父状态DriverStartedState的processMessage进行处理，DriverStartedState.processMessage来处理，DriverStartedState.processMessage处理Message(CMD_START_SINGLE_SCAN)时先判断当前是否处于ScanningState状态，如果是则直接mPendingScans.addRequest，否则mPendingScans.addRequest后还要调用WifiScanningServiceImpl.tryToStartNewScan()。
+
+frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java
+
+```
+84     public class WifiScanningServiceImpl extends IWifiScanner.Stub {
+......
+246      private class ClientHandler extends WifiHandler {
+......
+252          @Override
+253          public void handleMessage(Message msg) {
+......
+328              switch (msg.what) {
+......
+351                  case WifiScanner.CMD_START_SINGLE_SCAN:
+352                  case WifiScanner.CMD_STOP_SINGLE_SCAN:
+353                      mSingleScanStateMachine.sendMessage(Message.obtain(msg));
+......
+367              }
+368          }
+369      }
+......
+396      private WifiSingleScanStateMachine mSingleScanStateMachine;
+......
+626      class WifiSingleScanStateMachine extends StateMachine {
+......
+879          class DriverStartedState extends State {
+......
+892              @Override
+893              public boolean processMessage(Message msg) {
+......
+896                  switch (msg.what) {
+897                      case WifiScanner.CMD_ENABLE:
+898                          // Ignore if we're already in driver loaded state.
+899                          return HANDLED;
+900                      case WifiScanner.CMD_START_SINGLE_SCAN:
+......
+939                              if (getCurrentState() == mScanningState) {
+940                                  if (activeScanSatisfies(scanSettings)) {
+941                                      mActiveScans.addRequest(ci, handler, workSource, scanSettings);
+942                                  } else {
+943                                      mPendingScans.addRequest(ci, handler, workSource, scanSettings);
+944                                  }
+945                              } else {
+946                                  mPendingScans.addRequest(ci, handler, workSource, scanSettings);
+947                                  tryToStartNewScan();
+948                              }
+......
+961                  }
+962              }
+963          }
+964  
+965          class IdleState extends State {
+......
+971              @Override
+972              public boolean processMessage(Message msg) {
+973                  return NOT_HANDLED;
+974              }
+975          }
+......
+2678  }
+```
 
 
 
+WifiScanningServiceImpl.tryToStartNewScan()实现如下：
+
+与前面打开wifi是通过IdleState.enter()调用tryToStartNewScan时不同，此时由于mPendingScans.addRequest，tryToStartNewScan不直接返回，而是去调用
+
+WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSingleScan(WifiNative.ScanSettings scanSettings)。
+
+![image-20220408120554388](wifi.assets/image-20220408120554388.png)
+
+WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSingleScan(WifiNative.ScanSettings scanSettings)主要是从mScannerImpls中取出WifiScannerImpl抽象类的子对象，根据前面打开wifi时的分析，可以认为该对象就是WificondScannerImpl对象，然后调用WificondScannerImpl对象的startSingleScan方法。
+
+WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSingleScan(WifiNative.ScanSettings scanSettings)实现如下：
+
+![image-20220408120928537](wifi.assets/image-20220408120928537.png)
 
 
 
+WificondScannerImpl.startSingleScan() 主要调用WifiNative.scan
+
+```
+52  public class WificondScannerImpl extends WifiScannerImpl implements Handler.Callback {
+......
+145      @Override
+146      public boolean startSingleScan(WifiNative.ScanSettings settings,
+147              WifiNative.ScanEventHandler eventHandler) {
+......
+187                  success = mWifiNative.scan(
+188                          getIfaceName(), settings.scanType, freqs, hiddenNetworkSSIDSet);
+......
+222      }
+......
+536  }
+```
+
+WifiNative.scan调用WifiCondManager.startScan
+
+![image-20220408180715801](wifi.assets/image-20220408180715801.png)
+
+mWifiCondManager是WifiNl80211Manager 类型的对象，因此调用到了WifiNl80211Manager.startScan:
+
+frameworks/base/wifi/java/android/net/wifi/nl80211/WifiNl80211Manager.java
+
+![image-20220408181115628](wifi.assets/image-20220408181115628.png)
+
+WifiNl80211Manager.getScannerImpl如下：
+
+![image-20220408181226918](wifi.assets/image-20220408181226918.png)
+
+前面打开wifi时，在setupInterfaceForClientInScanMode中调用了WifiCondManager.setupInterfaceForClientMode，在其中把一个IWifiScannerImpl代理对象放入了mWificondScanners中，这里调用getScannerImpl将其取出并调用IWifiScannerImpl代理对象的scan方法，IWifiScannerImpl代理对象的实现端在wificond进程中：
 
 
+
+### 6.3 获取扫描结果
 
 WifiManager.getScanResults()
 
 
 
+
+
+
+
+###  6.4 连接AP
+
 wpa_supplicant_req_scan
 
 
-
-###  6.3 连接AP
 
 #### 6.3. framework配置相关参数，启动认证
 
