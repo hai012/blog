@@ -939,12 +939,6 @@ interface ISupplicantStaIface extends ISupplicantIface
 
 ## 3 wificond
 
-### 
-
-
-
-
-
 
 
 
@@ -2495,11 +2489,11 @@ wifi_load_driver_ext
 
 
 
-##### 5、mWifiCondManager.setupInterfaceForClientMode
+##### 5、WifiNl80211Manager .setupInterfaceForClientMode
 
 
 
-
+![image-20220412212230035](wifi.assets/image-20220412212230035.png)
 
 
 
@@ -2572,7 +2566,7 @@ BlockingRunnable.postAndWait(Handler handler, long timeout)方法首先使用han
 
 ![image-20220408103505251](wifi.assets/image-20220408103505251.png)
 
-#### 6.2.3 WifiScanningServiceImpl.WifiSingleScanStateMachine
+#### 6.2.3 WifiScanningServiceImpl.WifiSingleScanStateMachine扫描阶段处理
 
 根据在打开wifi过程中对AsyncChanel的分析，将由某个线程从looper队列中把Message(CMD_START_SINGLE_SCAN)取出，然后调用到WifiScanningServiceImpl.ClientHandler.handleMessage(Message msg)来处理消息，ClientHandler的重写的handleMessage在处理Message(CMD_START_SINGLE_SCAN)时直接将其发送给了WifiScanningServiceImpl内部的WifiSingleScanStateMachine，WifiSingleScanStateMachine根据前面打开wifi流程的分析，现在处于IdleState，IdleState.processMessage无法处理，因此由其父状态DriverStartedState的processMessage进行处理，DriverStartedState.processMessage来处理，DriverStartedState.processMessage处理Message(CMD_START_SINGLE_SCAN)时先判断当前是否处于ScanningState状态，如果是则直接mPendingScans.addRequest，否则mPendingScans.addRequest后还要调用WifiScanningServiceImpl.tryToStartNewScan()。
 
@@ -2647,30 +2641,25 @@ WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSing
 
 ![image-20220408120554388](wifi.assets/image-20220408120554388.png)
 
-WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSingleScan(WifiNative.ScanSettings scanSettings)主要是从mScannerImpls中取出WifiScannerImpl抽象类的子对象，根据前面打开wifi时的分析，可以认为该对象就是WificondScannerImpl对象，然后调用WificondScannerImpl对象的startSingleScan方法。
+WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSingleScan(WifiNative.ScanSettings scanSettings)主要是从mScannerImpls中取出WifiScannerImpl抽象类的子对象，根据前面打开wifi时的分析，可以认为该对象就是WificondScannerImpl对象，然后调用WificondScannerImpl对象的startSingleScan方法。**注意，调用WificondScannerImpl.startSingleScan时第二个参数传入了一个WifiNative.ScanEventHandler对象,后续扫描结果通过这个对象返回**
 
 WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSingleScan(WifiNative.ScanSettings scanSettings)实现如下：
 
-![image-20220408120928537](wifi.assets/image-20220408120928537.png)
+![image-20220413103704868](wifi.assets/image-20220413103704868.png)
 
 
 
-WificondScannerImpl.startSingleScan() 主要调用WifiNative.scan
+WificondScannerImpl.startSingleScan() 首先使用传入的第二个参数也就是WifiNative.ScanEventHandler来new一个mLastScanSettings对象，其类型是LastScanSettings，然后再调用WifiNative.scan
 
-```
-52  public class WificondScannerImpl extends WifiScannerImpl implements Handler.Callback {
-......
-145      @Override
-146      public boolean startSingleScan(WifiNative.ScanSettings settings,
-147              WifiNative.ScanEventHandler eventHandler) {
-......
-187                  success = mWifiNative.scan(
-188                          getIfaceName(), settings.scanType, freqs, hiddenNetworkSSIDSet);
-......
-222      }
-......
-536  }
-```
+frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WificondScannerImpl.java
+
+![image-20220413101127700](wifi.assets/image-20220413101127700.png)
+
+
+
+
+
+
 
 WifiNative.scan调用WifiCondManager.startScan
 
@@ -2686,17 +2675,467 @@ WifiNl80211Manager.getScannerImpl如下：
 
 ![image-20220408181226918](wifi.assets/image-20220408181226918.png)
 
-前面打开wifi时，在setupInterfaceForClientInScanMode中调用了WifiCondManager.setupInterfaceForClientMode，在其中把一个IWifiScannerImpl代理对象放入了mWificondScanners中，这里调用getScannerImpl将其取出并调用IWifiScannerImpl代理对象的scan方法，IWifiScannerImpl代理对象的实现端在wificond进程中：
+前面打开wifi时，在setupInterfaceForClientInScanMode中调用了WifiCondManager.setupInterfaceForClientMode，在其中把一个IWifiScannerImpl代理对象放入了mWificondScanners中，这里调用getScannerImpl将其取出并调用IWifiScannerImpl代理对象的scan方法，IWifiScannerImpl代理对象的实现端在wificond进程中。最终通过AIDL调用wificond进程提供的方法来使用netlink套接字发送数据给驱动。wificond进程对于扫描这块的处理参考第3节。
+
+
+
+#### 6.2.4 BnWificond服务注册
+
+1、创建一个android::wificond::LooperBackedEventLoop的对象event_dispatcher。
+
+2、给event_dispatcher添加需要监听的binder通信的fd。
+
+3、创建一个android::wificond::NetlinkManager类的netlink_manager对象，在NetlinkManager的构造函数中把传入的event_dispatcher对象保存起来。
+
+4、调用netlink_manager.Start()创建netlink套接字并给event_dispatcher对象添加需要监听的netlink套接字fd。
+
+5、创建android::wificond::Server类(继承android::net::wifi::nl80211::BnWificond)的对象server。
+
+6、调用RegisterServiceOrCrash(server)，在该方法中获取BpServiceManager对象，调用addService(android::String16(kServiceName), service)把BnWificond服务实现端注册到ServiceManager。其服务名字kServiceName是"wifinl80211"
+
+7、调用event_dispatcher->Poll()开始循环监听fd，如果有事件则从阻塞状态醒来去处理事件。
+
+
+
+​                                                      system/connectivity/wificond/main.cpp
+
+![image-20220411102823772](wifi.assets/image-20220411102823772.png)
+
+其中NetlinkManager::Start()非常关键：
+
+1、创建sync_netlink_fd\_和async_netlink_fd\_这两个netlink套接字
+
+2、调用DiscoverFamilyId，最终先调用NetlinkManager::SendMessageAndGetResponses方法，该方法通过sync_netlink_fd\_  发送信息，poll等待，返回response，然后再调用NetlinkManager::OnNewFamily来处理返回的response。
+
+3、WatchSocket(&async_netlink_fd\_)   把async_netlink_fd\_ 放入epoll的监听队列，main函数最终调用event_dispatcher->Poll()就是监听这个队列中的fd并调用相关处理函数进行处理。在WatchSocket中指定了async_netlink_fd\_的处理函数是NetlinkManager::ReceivePacketAndRunHandler
+
+4、通过async_netlink_fd\_ 订阅NL80211_MULTICAST_GROUP_REG，NL80211_MULTICAST_GROUP_SCAN、NL80211_MULTICAST_GROUP_MLME
+
+
+
+![image-20220412172855413](wifi.assets/image-20220412172855413.png)
+
+
+
+![image-20220412174725454](wifi.assets/image-20220412174725454.png)
+
+
+
+![image-20220412174824704](wifi.assets/image-20220412174824704.png)
+
+
+
+
+
+![image-20220412174651295](wifi.assets/image-20220412174651295.png)
+
+
+
+
+
+#### 6.2.5 android::wificond::Server::createClientInterface
+
+
+
+直接new一个ClientInterfaceImpl对象，然后调用GetBinder()方法， 将其返回给 created_interface。
+
+
+
+![image-20220411104911845](wifi.assets/image-20220411104911845.png)
+
+
+
+
+
+GetBinder方法直接返回binder_
+
+
+
+
+
+
+
+![image-20220411113140452](wifi.assets/image-20220411113140452.png)
+
+
+
+
+
+binder_在ClientInterfaceImpl对象构造时指向了一个new出来的ClientInterfaceBinder对象。
+
+
+
+![image-20220411115713818](wifi.assets/image-20220411115713818.png)
+
+
+
+
+
+因此在其他进程调用createClientInterface时会得到一个ClientInterfaceBinder代理对象。
+
+
+
+
+
+#### 6.2.6 android::wificond::ClientInterfaceBinder::getWifiScannerImpl
+
+
+
+getWifiScannerImpl方法直接调用impl_的GetScanner()方法：system/connectivity/wificond/client_interface_binder.cpp
+
+![image-20220411115126225](wifi.assets/image-20220411115126225.png)
+
+impl_就是上节new ClientInterfaceBinder对象时传入的ClientInterfaceImpl对象，在ClientInterfaceBinder构造函数中保存到了impl\_
+
+![image-20220411115158014](wifi.assets/image-20220411115158014.png)
+
+ClientInterfaceImpl对象的GetScanner方法定义如下：system/connectivity/wificond/client_interface_impl.h
+
+![image-20220411115750546](wifi.assets/image-20220411115750546.png)
+
+ClientInterfaceImpl对象的GetScanner方法直接返回 scanner_     ，注意前面ClientInterfaceImpl的构造方法中把scanner_     指向了new出来的一个ScannerImpl对象。因此最终getWifiScannerImpl通过out_wifi_scanner_impl参数返回的是一个ScannerImpl对象。
+
+
+
+#### 6.2.7 android::wificond::ScannerImpl::scan
+
+system/connectivity/wificond/scanning/scanner_impl.cpp
+
+![image-20220411175447849](wifi.assets/image-20220411175447849.png)
+
+
+
+system/connectivity/wificond/scanning/scan_utils.cpp
+
+注意，在栈上创建trigger_scan对象时其构造函数传入了NL80211_CMD_TRIGGER_SCAN
+
+
+
+![image-20220411175614382](wifi.assets/image-20220411175614382.png)
+
+
+
+
+
+
+
+![image-20220412175140580](wifi.assets/image-20220412175140580.png)
+
+
+
+![image-20220412175210705](wifi.assets/image-20220412175210705.png)
+
+
+
+
+
+![image-20220412175253123](wifi.assets/image-20220412175253123.png)
+
+
+
+![image-20220412175327462](wifi.assets/image-20220412175327462.png)
+
+
+
+
+
+
+
+​                                  system/connectivity/wificond/net/netlink_manager.cpp
+
+![image-20220412201415008](wifi.assets/image-20220412201415008.png)
+
+
+
+
+
+​                                                   system/connectivity/wificond/net/netlink_manager.cpp
+
+![image-20220412211459749](wifi.assets/image-20220412211459749.png)
+
+
+
+从on_scan_result_ready_handler_这个std::map中通过if_index  find出来的是一个std::pair对象(即handler)，根据std::pair，first指key对象，即if_index  ，second指map中key对应的value对象。 根据system/connectivity/wificond/net/netlink_manager.h
+
+```
+75  typedef std::function<void(
+76      uint32_t interface_index,
+77      bool scan_stopped)> OnSchedScanResultsReadyHandler;
+......
+310    std::map<uint32_t, OnScanResultsReadyHandler> on_scan_result_ready_handler_;
+```
+
+显然这个value对象其实就是一个OnSchedScanResultsReadyHandler类型的对象。handler->second(if_index, aborted, ssids, freqs)其实就是调用OnSchedScanResultsReadyHandler类型的对象的operate()方法（也就是std::function指向的函数或类方法）。
+
+
+
+查看ScannerImpl的构造方法可以发现调用了ScanUtils::SubscribeScanResultNotification
+
+![image-20220412215913916](wifi.assets/image-20220412215913916.png)
+
+ScanUtils::SubscribeScanResultNotification调用了NetlinkManager::SubscribeScanResultNotification
+
+![image-20220412220058102](wifi.assets/image-20220412220058102.png)
+
+
+
+NetlinkManager:：SubscribeScanResultNotification就是把OnSchedScanResultsReadyHandler类型的对象放入on_scan_result_ready_handler_这个std::map的地方，参考system/connectivity/wificond/net/netlink_manager.cpp
+
+```
+791  void NetlinkManager::SubscribeScanResultNotification(
+792      uint32_t interface_index,
+793      OnScanResultsReadyHandler handler) {
+794    on_scan_result_ready_handler_[interface_index] = handler;
+795  }
+```
+
+
+
+因此OnSchedScanResultsReadyHandler这个std::function最终在ScannerImpl的构造方法中通过std::bind实例化，指向了ScannerImpl::OnScanResultsReady，故最终handler->second(if_index, aborted, ssids, freqs)就是调用ScannerImpl::OnScanResultsReady
+
+![image-20220412220748795](wifi.assets/image-20220412220748795.png)
+
+在ScannerImpl::OnScanResultsReady中直接调用scan_event_handler_->OnScanResultReady()，打开wifi时在framework层调用了setupInterfaceForClientMode，setupInterfaceForClientMode中new 一个ScanEventHandler对象(该类实现了IScanEvent接口)，然后调用wificondScanner.subscribeScanEvents()，把ScanEventHandler对象AIDL代理端传给wificond进程。wificondScanner在wificond进程中的实现端是ScannerImpl，看一下它的subscribeScanEvents方法：
+
+![image-20220412213611398](wifi.assets/image-20220412213611398.png)
+
+ScannerImpl::subscribeScanEvents将通过AIDL传入的ScanEventHandler代理对象赋给了scan_event_handler\_，因此最终
+
+scan_event_handler\_->OnScanResultReady()实际上是通过ScanEventHandler代理对象调到了AIDL实现端的ScanEventHandler对象的OnScanResultReady
+
+![image-20220412221520731](wifi.assets/image-20220412221520731.png)
+
+
+
+使用java.util.concurrent.Executor.execute去调用用于ScanEventCallback接口的对象的onScanResultReady()方法，这个callback对象在ScanEventHandler构造时传入，ScanEventHandler在setupInterfaceForClientMode中被new出来，new的时候使用了setupInterfaceForClientMode的形参，即scanCallback，再看
+
+WifiNative.setupInterfaceForClientInScanMode中调用setupInterfaceForClientMode传入的callback对象：
+
+![image-20220412222608940](wifi.assets/image-20220412222608940.png)
+
+最终调到了NormalScanEventCallback.onScanResultReady()
+
+![image-20220412222741164](wifi.assets/image-20220412222741164.png)
+
+NormalScanEventCallback.onScanResultReady中最终调到了WifiMonitor.broadcastScanResultEvent(String iface)
+
+![image-20220412222940648](wifi.assets/image-20220412222940648.png)
+
+
+
+Message(SCAN_RESULT_EVENT) 在WificondScannerImpl.handleMessage(Message msg)终被处理:
+
+![image-20220412223116394](wifi.assets/image-20220412223116394.png)
+
+处理时先取消超时限制，然后调用WificondScannerImpl.pollLatestScanData()
+
+![image-20220413102951221](wifi.assets/image-20220413102951221.png)
+
+
+
+
+
+pollLatestScanData中首先调用WifiNative.getScanResults获取信息:
+
+frameworks/opt/net/wifi/service/java/com/android/server/wifi/WifiNative.java
+
+![image-20220412224329937](wifi.assets/image-20220412224329937.png)
+
+
+
+WifiNl80211Manager.::getScanResults
+
+![image-20220412224513346](wifi.assets/image-20220412224513346.png)
+
+
+
+![image-20220412224625769](wifi.assets/image-20220412224625769.png)
+
+
+
+
+
+![image-20220412224829133](wifi.assets/image-20220412224829133.png)
+
+
+
+再回看WificondScannerImpl.pollLatestScanData()，在调用完WifiNative.getScanResults之后拿到结果，对结果进行处理后放到mLatestSingleScanResult这个 WifiScanner.ScanData类型的对象中，最后调用:
+
+```
+396                  mLastScanSettings.singleScanEventHandler
+397                          .onScanStatus(WifiNative.WIFI_SCAN_RESULTS_AVAILABLE);
+```
+
+mLastScanSettings.singleScanEventHandler保存的就是先前在WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.startSingleScan中调用impl.startSingleScan时传入的第二个参数:
+
+```
+747                      boolean success = impl.startSingleScan(
+748                              scanSettings, new ScanEventHandler(ifaceName));
+```
+
+因此pollLatestScanData的最后相当于调用了：WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.ScanEventHandler.onScanStatus(WifiNative.WIFI_SCAN_RESULTS_AVAILABLE)  
+
+![image-20220413104141252](wifi.assets/image-20220413104141252.png)
+
+根据事件类型调用到了WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.reportScanStatusForImpl
+
+![image-20220413104354197](wifi.assets/image-20220413104354197.png)
+
+
+
+#### 6.2.8 WifiScanningServiceImpl.WifiSingleScanStateMachine扫描结果处理
+
+在经过前面的分析，扫描阶段WifiSingleScanStateMachine处于ScanningState状态，此时看这个状态如何处理Message(CMD_SCAN_RESULTS_AVAILABLE)
+
+frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java
+
+![image-20220413105023693](wifi.assets/image-20220413105023693.png)
+
+在处理Message(CMD_SCAN_RESULTS_AVAILABLE)时首先调用ScannerImplsTracker.getLatestSingleScanResults()
+
+![image-20220413112058050](wifi.assets/image-20220413112058050.png)
+
+
+
+![image-20220413112223017](wifi.assets/image-20220413112223017.png)
+
+
+
+直接返回mLatestSingleScanResult，注意这个mLatestSingleScanResult，先前WificondScannerImpl.pollLatestScanData()方法中，在调用完WifiNative.getScanResults之后拿到结果，对结果进行处理后放到mLatestSingleScanResult这个 WifiScanner.ScanData类型的对象中。
+
+
+
+再回看WifiScanningServiceImpl.WifiSingleScanStateMachine.ScanningState.processMessage(Message msg),调用getLatestSingleScanResults获取到结果后再调用WifiScanningServiceImpl.reportScanResults(@NonNull ScanData results)来处理获取到的扫描结果，最后调用transitionTo(mIdleState)切换到IdleState根据前面打开wifi时切换到IdleState的分析，在IdleState.enter()中调用tryToStartNewScan(); 在tryToStartNewScan中首先判断一下是否还有如果pending scan requests，如果没有则直接返回。
+
+
+
+再来看WifiScanningServiceImpl.reportScanResults
+
+![image-20220413113855724](wifi.assets/image-20220413113855724.png)
+
+entry的类型是RequestInfo\<ScanSettings\>  使用它的reportEvent方法来发送Message(CMD_SCAN_RESULT)  ：
+
+![image-20220413143433450](wifi.assets/image-20220413143433450.png)
+
+
+
+RequestInfo\<ScanSettings\>的reportEvent方法直接调用RequestInfo\<ScanSettings\>对象构造时传入的ClientInfo对象的reportEvent方法。
+
+在tryToStartNewScan之前调了mPendingScans.addRequest(ci, handler, workSource, scanSettings); addRequest如下：
+
+![image-20220413145026816](wifi.assets/image-20220413145026816.png)
+
+
+
+![image-20220413175419848](wifi.assets/image-20220413175419848.png)
+
+ClientInfo对象从mClients这个map中取出，来看下它是什么时候调用放进去的：
+
+![image-20220413175518685](wifi.assets/image-20220413175518685.png)
+
+register()方法将this当前对象放入mClients这个map，其key是this当前对象中的mMessenger对象。再看下register的调用地方：
+
+frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WifiScanningServiceImpl.java
+
+![image-20220413180020981](wifi.assets/image-20220413180020981.png)
+
+
+
+因此这个ClientInfo接口的对象其实是在处理Message(CMD_CHANNEL_FULL_CONNECTION)时new出来的一个ExternalClientInfo对象，new的时候传入了ac(AsyncChanel类型)。ExternalClientInfo构造时把传入的AsyncChanel类型的ac保存到mChannel中，后面reportEvent方法使用mChannel来发送Message，ExternalClientInfo类如下：
+
+![image-20220413180317524](wifi.assets/image-20220413180317524.png)
+
+综上，WifiScanningServiceImpl.reportScanResults最终通过ExternalClientInfo.reportEvent调用AsyncChannel.sendMessage来发送Message(CMD_SCAN_RESULT) 。
+
+
+
+ac在传入ExternalClientInfo构造函数做参数之前调用了connected：
+
+![image-20220413181845430](wifi.assets/image-20220413181845430.png)
+
+
+
+
+
+之前scan时使用mAsyncChannel.sendMessage方法给WifiSingleScanStateMachine发Message,
+
+![image-20220413183043165](wifi.assets/image-20220413183043165.png)
+
+
+
+在AsyncChannel.sendMessage中把replyTo = mSrcMessenger
+
+![image-20220413183159918](wifi.assets/image-20220413183159918.png)
+
+
+
+最终有如下关系
+
+ac.mSrcHandler      = mAsyncChannel.mDstMessenger = ClientHandler对象     
+
+ac.mDstMessenger = mAsyncChannel.mSrcHandler      = ServiceHandler对象
+
+Message(CMD_START_SINGLE_SCAN)发往ClientHandler ，msg.replayTo 就是 ServiceHandler
+
+Message(CMD_SCAN_RESULT)发往ServiceHandler，msg.replayTo 就是ClientHandler 
+
+
+
+来看ServiceHandler.handleMessage如何处理Message(CMD_SCAN_RESULT)
+
+![image-20220413120657891](wifi.assets/image-20220413120657891.png)
+
+
+
+ServiceHandler.handleMessage首先调用getListenerWithExecutor从mListener这个map中获取listener。获得listener后使用executor.execute来调用它的onResult方法。
+
+![image-20220413185021014](wifi.assets/image-20220413185021014.png)
+
+![image-20220413185445502](wifi.assets/image-20220413185445502.png)
+
+
+
+
+
+来看下listener如何放入mListenerMap中，在ScanRequestProxy.startScan时调用了retrieveWifiScannerIfNecessary()
+
+![image-20220413185849590](wifi.assets/image-20220413185849590.png)
+
+
+
+ScanRequestProxy.retrieveWifiScannerIfNecessary(）new了一个GlobalScanListener对象并将其作为第二个参数调用WifiScanner.registerScanListener :
+
+![image-20220413190225214](wifi.assets/image-20220413190225214.png)
+
+
+
+WifiScanner.registerScanListener(@NonNull @CallbackExecutor Executor executor, @NonNull ScanListener listener)调用WifiScanner.addListener，addListener传入的参数GlobalScanListener对象。
+
+![image-20220413190556242](wifi.assets/image-20220413190556242.png)
+
+WifiScanner.addListener调用WifiScanner.putListener，最终WifiScanner.putListener把GlobalScanListener对象放入了mListenerMap中。
+
+![image-20220413190911469](wifi.assets/image-20220413190911469.png)
+
+
+
+故最终ServiceHandler.handleMessage首先调用getListenerWithExecutor从mListener这个map中获取listener就是这个GlobalScanListener对象,接着使用executor.execute来调用GlobalScanListener.onResult方法，扫描结果作为onResult的参数:
+
+![image-20220413191402302](wifi.assets/image-20220413191402302.png)
+
+GlobalScanListener.onResult直接把扫描结果放到mLastScanResults中。最后发广播通知扫描结果已经就位。
 
 
 
 ### 6.3 获取扫描结果
 
-WifiManager.getScanResults()
+APP收到扫描结果就位的广播后调用WifiManager.getScanResults()来获取扫描结果，WifiManager.getScanResults()的AIDL实现端是WifiManagerImpl.getScanResults() :
 
+![image-20220413191517577](wifi.assets/image-20220413191517577.png)
 
+ScanRequestProxy.getScanResults直接从mLastScanResults中读取先前放入的扫描结果：
 
-
+![image-20220413191559976](wifi.assets/image-20220413191559976.png)
 
 
 
