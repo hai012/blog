@@ -2511,9 +2511,21 @@ mtk把aosp中启动wpa_supplicant和创建wpa_supplicant interface的步骤被�
 
 ### 6.2 扫描AP
 
-#### 6.2.1 WifiServiceImpl.startScan
 
-WifiManager.startScan()通过AIDL调用到framework层服务实现端，WifiServiceImpl.startScan()如下：
+
+#### 6.2.1 WifiManager.startScan
+
+
+
+WifiManager.startScan()通过AIDL调用到framework层服务实现端：
+
+
+
+![image-20220414144606604](wifi.assets/image-20220414144606604.png)
+
+
+
+AIDL调用到framework层服务实现端WifiServiceImpl.startScan()如下：
 
 
 
@@ -2895,7 +2907,7 @@ NetlinkManager:：SubscribeScanResultNotification就是把OnSchedScanResultsRead
 
 ![image-20220412220748795](wifi.assets/image-20220412220748795.png)
 
-在ScannerImpl::OnScanResultsReady中直接调用scan_event_handler_->OnScanResultReady()，打开wifi时在framework层调用了setupInterfaceForClientMode，setupInterfaceForClientMode中new 一个ScanEventHandler对象(该类实现了IScanEvent接口)，然后调用wificondScanner.subscribeScanEvents()，把ScanEventHandler对象AIDL代理端传给wificond进程。wificondScanner在wificond进程中的实现端是ScannerImpl，看一下它的subscribeScanEvents方法：
+在ScannerImpl::OnScanResultsReady中直接调用scan_event_handler_->OnScanResultReady()，**打开wifi时在framework层调用了setupInterfaceForClientMode，setupInterfaceForClientMode中new 一个ScanEventHandler对象(该类实现了IScanEvent接口)，然后调用wificondScanner.subscribeScanEvents()，把ScanEventHandler对象AIDL代理端传给wificond进程。wificondScanner在wificond进程中的实现端是ScannerImpl，看一下它的subscribeScanEvents方法：**
 
 ![image-20220412213611398](wifi.assets/image-20220412213611398.png)
 
@@ -2977,7 +2989,7 @@ mLastScanSettings.singleScanEventHandler保存的就是先前在WifiScanningServ
 
 ![image-20220413104141252](wifi.assets/image-20220413104141252.png)
 
-根据事件类型调用到了WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.reportScanStatusForImpl
+根据事件类型调用到了WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.WifiScanningServiceImpl.WifiSingleScanStateMachine.ScannerImplsTracker.reportScanStatusForImpl
 
 ![image-20220413104354197](wifi.assets/image-20220413104354197.png)
 
@@ -3041,7 +3053,9 @@ frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WifiScannin
 
 
 
-因此这个ClientInfo接口的对象其实是在处理Message(CMD_CHANNEL_FULL_CONNECTION)时new出来的一个ExternalClientInfo对象，new的时候传入了ac(AsyncChanel类型)。ExternalClientInfo构造时把传入的AsyncChanel类型的ac保存到mChannel中，后面reportEvent方法使用mChannel来发送Message，ExternalClientInfo类如下：
+在WifiScanner构造时发送的Message(CMD_CHANNEL_FULL_CONNECTION)就是在这里处理。
+
+上文所述ClientInfo接口的对象其实是在处理Message(CMD_CHANNEL_FULL_CONNECTION)时new出来的一个ExternalClientInfo对象，new的时候传入了ac(AsyncChanel类型)。ExternalClientInfo构造时把传入的AsyncChanel类型的ac保存到mChannel中，后面reportEvent方法使用mChannel来发送Message。ExternalClientInfo类如下：
 
 ![image-20220413180317524](wifi.assets/image-20220413180317524.png)
 
@@ -3059,7 +3073,11 @@ ac在传入ExternalClientInfo构造函数做参数之前调用了connected：
 
 之前scan时使用mAsyncChannel.sendMessage方法给WifiSingleScanStateMachine发Message,
 
-![image-20220413183043165](wifi.assets/image-20220413183043165.png)
+![image-20220414092423146](wifi.assets/image-20220414092423146.png)
+
+
+
+
 
 
 
@@ -3129,7 +3147,15 @@ GlobalScanListener.onResult直接把扫描结果放到mLastScanResults中。最�
 
 ### 6.3 获取扫描结果
 
-APP收到扫描结果就位的广播后调用WifiManager.getScanResults()来获取扫描结果，WifiManager.getScanResults()的AIDL实现端是WifiManagerImpl.getScanResults() :
+#### 6.3.1 WifiManager.getScanResults()
+
+APP收到扫描结果就位的广播后调用WifiManager.getScanResults()来获取扫描结果，
+
+![image-20220414144946142](wifi.assets/image-20220414144946142.png)
+
+
+
+WifiManager.getScanResults()的AIDL实现端是WifiManagerImpl.getScanResults() :
 
 ![image-20220413191517577](wifi.assets/image-20220413191517577.png)
 
@@ -3139,25 +3165,176 @@ ScanRequestProxy.getScanResults直接从mLastScanResults中读取先前放入的
 
 
 
-###  6.4 连接AP
+### 6.4添加网络
 
-wpa_supplicant_req_scan
-
-
-
-#### 6.3. framework配置相关参数，启动认证
+#### 6.4.1 WifiManager.addNetwork(WifiConfiguration  config)
 
 WifiManager.addNetwork(WifiConfiguration  config);//返回networkid
 
+![image-20220414145140959](wifi.assets/image-20220414145140959.png)
+
+WifiManager.addNetwork直接调用WifiManager.addOrUpdateNetwork(WifiConfiguration config)
+
+![image-20220414145228409](wifi.assets/image-20220414145228409.png)
+
+WifiManager.addOrUpdateNetwork的AIDL实现端如下：
 
 
-WifiManager.enableNetwork(networkid, true);
-
-WifiManager.connect()
 
 
 
-WifiManager.getConnectionInfo();
+
+
+###  6.5 开始连接
+
+#### 6.5.1 WifiManager.connect
+
+WifiManager.connect(@NonNull WifiConfiguration config, @Nullable ActionListener listener)
+
+WifiManager.connect(int networkId, @Nullable ActionListener listener)
+
+两个方法都调用WifiManager.connectInternal(@Nullable WifiConfiguration config, int networkId,@Nullable ActionListener listener)
+
+使用networkId的版本调用WifiManager.connectInternal时WifiConfiguration类型的config对象传入的是null
+
+![image-20220414152257882](wifi.assets/image-20220414152257882.png)
+
+
+
+
+
+connectInternal调用WifiServiceImpl.connect(WifiConfiguration config, int netId, IBinder binder,@Nullable IActionListener callback, int callbackIdentifier)
+
+
+
+
+
+![image-20220414193045933](wifi.assets/image-20220414193045933.png)
+
+
+
+在connectInternal中使用传入的listener回调对象作为构造参数new一个ActionListenerProxy类型的listenerProxy对象，然后把listenerProxy作为第四个参数调用WifiServiceImpl代理端的connect方法。根据AIDL原理调用到WifiServiceImpl.connect实现端：
+
+
+
+![image-20220414193130376](wifi.assets/image-20220414193130376.png)
+
+
+
+WifiServiceImpl.connect实现端调用ClientModeImpl.connect，把回调对象作为第四个参数传入
+
+
+
+
+
+#### 6.5.2 WifiManager.enableNetwork
+
+WifiManager.enableNetwork(networkid, true)也能去连接wifi，其实现如下
+
+![image-20220414191335773](wifi.assets/image-20220414191335773.png)
+
+WifiManager.enableNetwork通过AIDL调用到WifiServiceImpl.enableNetwork
+
+![image-20220414191612907](wifi.assets/image-20220414191612907.png)
+
+WifiServiceImpl.enableNetwork调用WifiServiceImpl.triggerConnectAndReturnStatus
+
+![image-20220414191704876](wifi.assets/image-20220414191704876.png)
+
+WifiServiceImpl.triggerConnectAndReturnStatus最终也通过ClientModeImpl.connect去连接wifi。只是与上节相比没法传入回调对象，因为这里传入ClientModeImpl.connect的第四个参数即回调对象已经在triggerConnectAndReturnStatus方法中写死了，而上节的是使用的是listenerProxy对象，该对象由WifiManager.connect传入的回调对象作为参数构造而成，因此WifiManager.connect可以自己定制回调对象。而WifiManager.enableNetwork不行。
+
+
+
+#### 6.5.3 ClientModeImpl.connect
+
+ClientModeImpl.connect方法根据config/netId来获得/构造一个NetworkUpdateResult类型的result对象，然后使用result对象构造一个Message(CMD_CONNECT_NETWORK，result)
+
+
+
+![image-20220414194525778](wifi.assets/image-20220414194525778.png)
+
+
+
+
+
+#### 6.5.4 ClientModeImpl层次状态机
+
+
+
+根据打开wifi流程的分析，ClientModeImpl此时处于DisconnectedState，DisconnectedState父状态是ConnectModeState，ClientModeImpl.DisconnectedState.processMessage(Message message)没法处理Message(CMD_CONNECT_NETWORK，result)，接着由其父状态ConnectModeState的processMessage方法来处理，处理时从msg中取出result，从result取出netId，然后调用connectToUserSelectNetwork：
+
+
+
+```
+163  public class ClientModeImpl extends StateMachine {
+......
+3784      class ConnectModeState extends State {
+......
+3836          public boolean processMessage(Message message) {
+......
+3852              switch (message.what) {
+......
+4141                  case CMD_CONNECT_NETWORK:
+4142                      callbackIdentifier = message.arg2;
+4143                      result = (NetworkUpdateResult) message.obj;
+4144                      netId = result.getNetworkId();
+4145                      connectToUserSelectNetwork(
+4146                              netId, message.sendingUid, result.hasCredentialChanged());
+4147                      mWifiMetrics.logStaEvent(
+4148                              StaEvent.TYPE_CONNECT_NETWORK,
+4149                              mWifiConfigManager.getConfiguredNetwork(netId));
+4150                      sendActionListenerSuccess(callbackIdentifier);
+4151                      break;
+......
+4406              }
+......
+4413          }
+4414      }
+......
+6615  }
+```
+
+
+
+ClientModeImpl.connectToUserSelectNetwork(int netId, int uid, boolean forceReconnect)，如下：
+
+
+
+![image-20220414202631665](wifi.assets/image-20220414202631665.png)
+
+
+
+ClientModeImpl.startConnectToNetwork(int networkId, int uid, String bssid)发送
+
+Message(CMD_START_CONNECT, networkId, uid, SUPPLICANT_BSSID_ANY)：
+
+
+
+![image-20220414203451354](wifi.assets/image-20220414203451354.png)
+
+此时ClientModeImpl还是处于DisconnectedState状态，但ClientModeImpl.DisconnectedState.processMessage(Message message)没法处理Message，因此由其父状态ConnectModeState的processMessage方法来处理：
+
+![image-20220414210106143](wifi.assets/image-20220414210106143.png)
+
+
+
+ClientModeImpl.connectToNetwork(WifiConfiguration config)如下：
+
+![image-20220414210406353](wifi.assets/image-20220414210406353.png)
+
+
+
+WifiNative.connectToNetwork(@NonNull String ifaceName, WifiConfiguration configuration)
+
+![image-20220414210553743](wifi.assets/image-20220414210553743.png)
+
+
+
+
+
+
+
+#### 6.5.5 SupplicantStaIfaceHal.connectToNetwork
 
 
 
@@ -3168,6 +3345,8 @@ SupplicantStaIfaceHal对象的connectToNetwork方法定义在：frameworks/opt/n
 
 
 line 977  调用了 SupplicantStaIfaceHal的addNetworkAndSaveConfig方法来添加并配置一个网络，addNetworkAndSaveConfig方法在定义如下：frameworks/opt/net/wifi/service/java/com/android/server/wifi/SupplicantStaIfaceHal.java
+
+
 
 ![image-20220303200249654](wifi.assets/image-20220303200249654.png)
 
@@ -3187,7 +3366,11 @@ SupplicantStaNetworkHal的saveWifiConfiguration方法根据WifiConfiguration调�
 
 
 
+
+
 **返回之后在SupplicantStaNetworkHal的saveWifiConfiguration方法中在line 475调用SupplicantStaNetworkHal的registerCallback方法注册回调对象，registerCallback方法调用StaNetwork的代理对象，真正实现在wpa_supplicant_8/wpa_supplicant/hidl/1.3/sta_network.cpp中的line 147行。向wpa_supplicant注册回调对象后当wpa_supplicant触发一些事件就会调用这些代理回调对象里的一些方法，回调对象具体实现在SupplicantStaNetworkHal的一个内部类**
+
+
 
 ![image-20220304101842919](wifi.assets/image-20220304101842919.png)
 
@@ -3211,7 +3394,11 @@ SupplicantStaIfaceHal通过调用StaNetwork代理端的select方法调到了wpa_
 
 
 
+
+
 external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c中定义了wpa_supplicant_select_network函数，wpa_supplicant_select_network函数经过一番判断最终如果有需要则调用wpa_supplicant_req_scan函数，第二和第三个参数传入的都是0。wpa_supplicant_req_scan函数如下：
+
+
 
 
 
@@ -3220,6 +3407,8 @@ external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c中定义了wpa_supplic
 
 
 wpa_supplicant_req_scan在epoll队列中注册了一个超时函数，其间隔为0，即待调用完wpa_supplicant_req_scan函数后回到epoll监听时wpa_supplicant_scan函数马上就能得到执行。
+
+
 
 external/wpa_supplicant_8/wpa_supplicant/scan.c
 
