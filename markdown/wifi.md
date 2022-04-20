@@ -975,7 +975,7 @@ interface ISupplicantStaIface extends ISupplicantIface
 
 
 
-
+wpa_cli -i wlan0 -p -g@android:wpa_wlan0 IFNAME=wlan0 status
 
 
 
@@ -3382,7 +3382,7 @@ SupplicantStaNetworkHal的saveWifiConfiguration方法根据WifiConfiguration调�
 
 
 
-#### 6.3. wpa select network
+#### 6.3. StaNetwork::select
 
 SupplicantStaIfaceHal通过调用StaNetwork代理端的select方法调到了wpa_supplicant中的C++具体实现的select方法：
 
@@ -3390,17 +3390,55 @@ SupplicantStaIfaceHal通过调用StaNetwork代理端的select方法调到了wpa_
 
 
 
+
+
 ![image-20220305155940747](wifi.assets/image-20220305155940747.png)
 
+retrieveIfacePtr()根据interface名(一般是wlan0)获取到interface对应的wpa_supplicant结构体指针。
+
+retrieveNetworkPtr()返回当前networkid对应的wpa_ssid结构体指针
+
+接着调用external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c中定义的wpa_supplicant_select_network函数:
+
+![image-20220418152459972](wifi.assets/image-20220418152459972.png)
+
+在wpa_supplicant_select_network函数中做如下事情：
+
+1、首先判断当前wpa_supplicant和wpa_ssid的状态，如果当前的wpa_supplicant处于WPA_ATHENTICATING状态且wpa_supplicant当前的ssid不是传入的wpa_ssid则调用wpa_supplicant_deathenticate停止对wpa_supplicant中的其他wpa_ssid进行认证。
+
+2、如果传入了wpa_ssid则把该wpa_ssid使能且把wpa_supplicant中的其他wpa_ssid失能，否则把wpa_supplicant中的所有wpa_ssid使能。
+
+3、如果当前的wpa_supplicant处于WPA_ATHENTICATING状态且wpa_supplicant当前的ssid等于传入的wpa_ssid则什么也不做直接打个log然后返回。
+
+4、如果传入了wpa_ssid则初始化eapol状态机。
+
+5、调用wpa_supplicant_fast_associate
+
+6、如果上一步返回不为1则调用wpa_scan_reset_sched_scan取消并停止扫描，然后调用wpa_supplicant_req_scan开始扫描。
+
+
+
+##### wpa_supplicant_deathenticate
 
 
 
 
-external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c中定义了wpa_supplicant_select_network函数，wpa_supplicant_select_network函数经过一番判断最终如果有需要则调用wpa_supplicant_req_scan函数，第二和第三个参数传入的都是0。wpa_supplicant_req_scan函数如下：
+
+##### wpa_supplicant_fast_associate
+
+CONFIG_NO_SCAN_PROCESSING宏未定义
+
+wpa_supplicant_fast_associate首先调用os_reltime_expired判断一下距离上层wpa_supplicant扫描是否过去了SCAN_RES_VALID_FOR_CONNECT秒，如果超时则直接返回-1，否则后续将直接调用wpas_select_network_from_last_scan。
+
+![image-20220418163709000](wifi.assets/image-20220418163709000.png)
+
+![image-20220418163945235](wifi.assets/image-20220418163945235.png)
 
 
 
 
+##### wpa_supplicant_req_scan
+wpa_supplicant_select_network函数经过一番判断最终如果有需要则调用wpa_supplicant_req_scan函数，第二和第三个参数传入的都是0。wpa_supplicant_req_scan函数如下：
 
 ![image-20220305161523593](wifi.assets/image-20220305161523593.png)
 
@@ -3431,7 +3469,11 @@ external/wpa_supplicant_8/wpa_supplicant/scan.c
 1338  }
 ```
 
-***如果是第一次选择连接某个网络则需要调用wpa_supplicant_trigger_scan先触发一次扫描，之后就不用触发扫描直接调用wpa_supplicant_associate进行认证关联操作。***
+
+
+***通过wpa_supplicant_select_network调到wpa_supplicant_scan时传入的wpa_s->connect_without_scan为NULL，不在line 959调用wpa_supplicant_associate函数。而是往下执行调用到了wpa_supplicant_trigger_scan先触发一次扫描，之后就不用触发扫描直接调用wpa_supplicant_associate进行认证关联操作。***
+
+
 
 
 
@@ -3481,6 +3523,8 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211_scan.c
 324  			    struct wpa_driver_scan_params *params)
 325  {
 ......
+336  	msg = nl80211_scan_common(bss, NL80211_CMD_TRIGGER_SCAN, params);
+......
 371  	ret = send_and_recv_msgs(drv, msg, NULL, NULL);
 ······
 413  	eloop_cancel_timeout(wpa_driver_nl80211_scan_timeout, drv, drv->ctx);
@@ -3498,11 +3542,7 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211_scan.c
 
 
 
-
-
-
-
-驱动回复数据后回调函数调用到do_process_drv_event函数来处理：
+驱动回复数据后回调函数调用到do_process_drv_event函数来处理，注意，首先回复的是NL80211_CMD_TRIGGER_SCAN，之后回复的是NL80211_CMD_NEW_SCAN_RESULTS：
 
 external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c
 
@@ -3512,6 +3552,21 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c
 2579  {
 ......
 2607  	switch (cmd) {
+2608  	case NL80211_CMD_TRIGGER_SCAN:
+2609  		wpa_dbg(drv->ctx, MSG_DEBUG, "nl80211: Scan trigger");
+2610  		drv->scan_state = SCAN_STARTED;
+2611  		if (drv->scan_for_auth) {
+2612  			/*
+2613  			 * Cannot indicate EVENT_SCAN_STARTED here since we skip
+2614  			 * EVENT_SCAN_RESULTS in scan_for_auth case and the
+2615  			 * upper layer implementation could get confused about
+2616  			 * scanning state.
+2617  			 */
+2618  			wpa_printf(MSG_DEBUG, "nl80211: Do not indicate scan-start event due to internal scan_for_auth");
+2619  			break;
+2620  		}
+2621  		wpa_supplicant_event(drv->ctx, EVENT_SCAN_STARTED, NULL);
+2622  		break;
 ......
 2632  	case NL80211_CMD_NEW_SCAN_RESULTS:
 2633  		wpa_dbg(drv->ctx, MSG_DEBUG,
@@ -3547,21 +3602,22 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c
 
 
 
+不管是NL80211_CMD_TRIGGER_SCAN还是NL80211_CMD_NEW_SCAN_RESULTS最终都回调用到wpa_supplicant_event来处理，在wpa_supplicant_event中对应的事件分别是EVENT_SCAN_STARTED和EVENT_SCAN_RESULTS：
+
 external/wpa_supplicant_8/wpa_supplicant/events.c
 
 ```
-4594  void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
-4595  			  union wpa_event_data *data)
-4596  {
-......
-4719  	case EVENT_SCAN_RESULTS:
-......
-4738  		if (wpa_supplicant_event_scan_results(wpa_s, data))
-4739  			break; /* interface may have been removed */
-
-......
-5413  }
+4595  void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
+4596  			  union wpa_event_data *data)
 ```
+
+![image-20220419112606888](wifi.assets/image-20220419112606888.png)
+
+wpa_supplicant_event在处理EVENT_SCAN_RESULTS时调用wpa_supplicant_event_scan_results
+
+
+
+
 
 
 
@@ -3585,6 +3641,12 @@ external/wpa_supplicant_8/wpa_supplicant/events.c
 ......
 2155  }
 ```
+
+
+
+_wpa_supplicant_event_scan_results调到了wpas_select_network_from_last_scan函数，回到起点，wpa_supplicant_fast_associate最终也调到了wpas_select_network_from_last_scan函数，看来该函数专门负责去连接AP
+
+
 
 
 
@@ -3628,7 +3690,7 @@ external/wpa_supplicant_8/wpa_supplicant/events.c
 
 
 
-#### 6.3. wpa athenticate&&associate
+##### wpa_supplicant_associate
 
 external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 
@@ -3637,6 +3699,12 @@ external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 2119  			      struct wpa_bss *bss, struct wpa_ssid *ssid)
 2120  {
 ......
+2266  	if ((wpa_s->drv_flags & WPA_DRIVER_FLAGS_SME) &&
+2267  	    ssid->mode == WPAS_MODE_INFRA) {
+2268  		sme_authenticate(wpa_s, bss, ssid);
+2269  		return;
+2270  	}
+......
 2298  	if (radio_add_work(wpa_s, bss ? bss->freq : 0, "connect", 1,
 2299  			   wpas_start_assoc_cb, cwork) < 0) {
 2300  		os_free(cwork);
@@ -3644,7 +3712,42 @@ external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 2302  }
 ```
 
+wpa_supplicant_associate函数分为两种处理方式，一种是sae auth  另一种是external auth
 
+######  sae auth
+
+https://blog.csdn.net/krokodil98/article/details/118612374
+
+WPA3-Personal采用了新的加密方式，SAE算法。
+
+![img](wifi.assets/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2tyb2tvZGlsOTg=,size_16,color_FFFFFF,t_70#pic_center.jpeg)
+
+
+
+
+
+
+
+######  external auth
+
+https://blog.csdn.net/krokodil98/article/details/118761897
+
+WPA2的wifi连接流程：auth只有两帧
+
+STA ------------>   Authentication Request  --------> AP //认证Auth类型，Open System , Shared Key等
+STA <------------   Authentication Response <------ AP
+STA ------------->  Association Request  ------------> AP  //请求与AP建立关联，从而可以进行数据交互
+STA <-------------  Association Response <----------- AP
+STA <-------------  EAPOL-KEY <----------- AP
+STA ------------>  EAPOL-KEY  --------> AP 
+STA <-------------  EAPOL-KEY <----------- AP
+STA ------------>  EAPOL-KEY  --------> AP 
+
+
+
+
+
+wpa_supplicant_associate函数分为两种处理方式，一种是external auth
 
 external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 
