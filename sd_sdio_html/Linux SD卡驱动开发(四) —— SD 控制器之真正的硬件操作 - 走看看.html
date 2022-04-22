@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<!-- saved from url=(0046)http://t.zoukankan.com/tlnshuju-p-7360326.html -->
+<html lang="zh-CN"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <!-- Required meta tags -->
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <link rel="shortcut icon" href="http://t.zoukankan.com/public/img/favicon.ico?v=20200522" type="image/x-icon">
+  <meta name="referrer" content="no-referrer">
+
+  <!-- Bootstrap CSS -->
+  <link rel="stylesheet" href="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/bootstrap.min.css" integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+
+  <!-- 引入博客园电脑端css -->
+  <link rel="stylesheet" href="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/blog-common.min.css">
+  <!-- 引入博客园手机css -->
+  <link id="mobile-style" media="only screen and (max-width: 767px)" type="text/css" rel="stylesheet" href="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/bundle-anothereon001-mobile.min.css">
+
+
+  <!-- 响应式 meta标签 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <title>Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看</title>
+  <meta name="keywords" content="Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作">
+  <meta name="description" content="前面对SD卡控制器有了一个主要的介绍。事实上SD控制器层更过的意义是为core层提供一种操作SD卡硬件的一种方法。当然不同的控制器对硬件控制的方法不尽同样，可是他们终于都能像core层提交一个统一的封">
+  <style type="text/css">
+    ul li a{
+      color:#337ab7;
+      text-decoration:none;
+    }
+    h1{
+      font-size:1.2rem;
+      text-align:center;
+      font-weight:bold;
+    }
+    .ul-li-title{
+      word-wrap:break-word;
+    }
+    .ul-li{
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      font-size:0.95rem;
+      line-height:1.5rem;
+    }
+    .ul-li-bg{
+     background-color:rgb(245,245,245);
+   }
+   .from-a{
+     word-wrap:break-word;
+     font-size:0.95rem;
+   }
+
+    .li-rymodal{
+      /*float: left;
+      list-style: none;
+      margin: 5px;*/
+      list-style: none;
+      margin: 5px;
+      white-space: nowrap;
+      width: 70px;
+      display: inline-block;
+    }
+    .ul-rymodal{
+      display: block;padding: 0;
+      white-space: nowrap;
+      overflow-x: scroll;
+    }
+ </style>
+
+
+
+
+</head>
+<body>
+
+  <!-- 引入头部导航 -->
+    <div class="row p-0 m-0">
+    <div class="container-fluid p-0 m-0">
+      <nav class="navbar navbar-expand-lg navbar-dark" style="background-color:rgb(34,34,34)">
+        <div class="container">
+          <a class="navbar-brand" href="http://t.zoukankan.com/">
+           <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" fill="currentColor" class="bi bi-exclude" viewBox="0 0 16 16">
+              <path d="M0 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2H2a2 2 0 0 1-2-2V2zm12 2H5a1 1 0 0 0-1 1v7h7a1 1 0 0 0 1-1V4z"></path>
+          </svg>
+          </a>
+        <a class="navbar-brand" href="http://t.zoukankan.com/" style="font-size:1.2rem;">zoukankan</a>
+        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav" style="font-size:0.8rem;">
+          <ul class="navbar-nav">
+            <li class="nav-item">
+              <a class="nav-link">HTML</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link">CSS</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link">PHP</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link">JAVA</a>
+            </li>
+          </ul>
+        </div>
+      </div>
+      </nav>    
+      </div> 
+    </div>
+    <div class="mt-4">   
+    </div>
+  
+  <div class="container">
+    <div class="row">
+
+      <div class="col-lg-8">
+
+        <ul class="list-group">
+
+          <li class="list-group-item ul-li-title">
+            <h1>Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作</h1>
+            <hr>
+            <span class="pre-scrollable"><div id="cnblogs_post_body" class="blogpost-body ">
+    <div id="article_content" class="article_content tracking-ad" data-mod="popu_307" data-dsm="post">
+
+<p>&nbsp; &nbsp; &nbsp; 前面对SD卡控制器有了一个主要的介绍。事实上SD控制器层更过的意义是为core层提供一种操作SD卡硬件的一种方法。当然不同的控制器对硬件控制的方法不尽同样，可是他们终于都能像core层提交一个统一的封装有操作方法的数据结构，那便是即将闪亮登场的<span style="background-color:rgb(255,255,0)"><strong>struct mmc_host_ops</strong></span>....相应的host文件为s3cmci.c。</p>
+<p>&nbsp; &nbsp; 接下来就来揭开与之相应的struct&nbsp;mmc_host_ops结构的神奇面纱....</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_1_3742538" class="cpp" name="code">static struct mmc_host_ops s3cmci_ops = {  
+    .request    = s3cmci_request,  
+    .set_ios    = s3cmci_set_ios,  
+    .get_ro     = s3cmci_get_ro,  
+    .get_cd     = s3cmci_card_present,  
+    .enable_sdio_irq = s3cmci_enable_sdio_irq,  
+};  </pre>
+<p></p>
+<p>&nbsp; &nbsp; &nbsp; &nbsp;在讲述每一个方法详细的实现之前。先来对struct mmc_host_ops结构中的各个成员有个简单的认识。</p>
+<p><strong>request方法</strong>：不管是前面所说的单纯的<span style="background-color:rgb(255,255,0)">命令传输</span>，还是带有<span style="background-color:rgb(255,255,0)">数据的传输过程</span>，无一例外终于都是调用request来实现的。那么如您所想，他也将成为这个舞台万众瞩目的焦点。</p>
+<p><strong>set_ios方法</strong>：用于设置SD卡控制器，前面我们所见到的设置控制器时钟。数据线宽度等等一系列操作终于就是通过他来实现的。</p>
+<p><strong>get_ro方法</strong>：获取卡的写保护状态。前面所过。SD卡初始化完毕以后，我们进行的一个最后的工作便是检測卡的写保护状态，事实上就是调用get_ro方法。</p>
+<p><strong>get_cd方法</strong>：检測卡是否在卡槽之中，它所相应的函数前面已经在初始化中分析过了。这里不再单独列来。</p>
+<p><strong>enable_sdio_irq方法</strong>：就是使能SDIO卡的中断。这个是对sdio卡而言的。这里将不做重点分析。<br>
+</p>
+<p>&nbsp; &nbsp; &nbsp; &nbsp;有了一个初步的了解之后，接下来的时间就来各个击破了。本着由浅入深的原则我们先来看看s3cmci_get_ro。</p>
+<p><br>
+</p>
+<p><strong><span style="font-size:18px">一、s3cmci_get_ro</span></strong></p>
+<p>&nbsp; &nbsp; &nbsp; 从SD卡结构上来说有个写保护的开关。这就使得推断SD卡是否写保护能够从其机械特征上入手。从而特殊设计的SD卡槽为我们提供了方便。</p><p>在这里採用的方法正是利用了这样的特殊设计的SD卡槽带来的优势，因此仅仅须要读取SD卡槽的SD写保护引脚的状态就能判定卡写保护的情况。</p><p>实现的代码例如以下：</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_2_7350821" class="cpp" name="code">static int s3cmci_get_ro(struct mmc_host *mmc)
+{
+	struct s3cmci_host *host = mmc_priv(mmc);
+	struct s3c24xx_mci_pdata *pdata = host-&gt;pdata;
+	int ret;
+
+	if (pdata-&gt;no_wprotect)
+		return 0;
+
+	ret = gpio_get_value(pdata-&gt;gpio_wprotect) ?<p></p><p> 1 : 0;
+	ret ^= pdata-&gt;wprotect_invert;
+
+	return ret;
+}</p></pre>
+<p></p>
+<p>第10行正是获取SD写保护引脚的值，当然因为硬件设计上的不同可能带来状态上的取反。所以这里有个pdata-&gt;wprotect_invert标记决定是否应该反相。对于仅仅读来说应该返回1，否则该方法的返回值为0。<br>
+</p>
+<p><br>
+</p>
+<p><strong><span style="font-size:18px">二、s3cmci_set_ios</span></strong></p>
+<p>&nbsp; &nbsp; &nbsp; 依据我们前面所见到的种种设置，这里的ioset可能会相对烦锁一些，详细的代码例如以下：</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_3_2508253" class="cpp" name="code">static void s3cmci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+{
+	struct s3cmci_host *host = mmc_priv(mmc);
+	u32 mci_con;
+
+	/* Set the power state */
+
+	mci_con = readl(host-&gt;base + S3C2410_SDICON);
+
+	switch (ios-&gt;power_mode) {
+	case MMC_POWER_ON:
+	case MMC_POWER_UP:
+		/* Configure GPE5...GPE10 pins in SD mode */
+		s3c_gpio_cfgall_range(S3C2410_GPE(5), 6, S3C_GPIO_SFN(2),
+				      S3C_GPIO_PULL_NONE);
+
+		if (host-&gt;pdata-&gt;set_power)
+			host-&gt;pdata-&gt;set_power(ios-&gt;power_mode, ios-&gt;vdd);
+
+		if (!host-&gt;is2440)
+			mci_con |= S3C2410_SDICON_FIFORESET;
+
+		break;
+
+	case MMC_POWER_OFF:
+	default:
+		gpio_direction_output(S3C2410_GPE(5), 0);
+
+		if (host-&gt;is2440)
+			mci_con |= S3C2440_SDICON_SDRESET;
+
+		if (host-&gt;pdata-&gt;set_power)
+			host-&gt;pdata-&gt;set_power(ios-&gt;power_mode, ios-&gt;vdd);
+
+		break;
+	}
+
+	s3cmci_set_clk(host, ios);
+
+	/* Set CLOCK_ENABLE */
+	if (ios-&gt;clock)
+		mci_con |= S3C2410_SDICON_CLOCKTYPE;
+	else
+		mci_con &amp;= ~S3C2410_SDICON_CLOCKTYPE;
+
+	writel(mci_con, host-&gt;base + S3C2410_SDICON);
+
+	if ((ios-&gt;power_mode == MMC_POWER_ON) ||
+	    (ios-&gt;power_mode == MMC_POWER_UP)) {
+		dbg(host, dbg_conf, "running at %lukHz (requested: %ukHz).
+",
+			host-&gt;real_rate/1000, ios-&gt;clock/1000);
+	} else {
+		dbg(host, dbg_conf, "powered down.
+");
+	}
+
+	host-&gt;bus_width = ios-&gt;bus_width;
+}
+</pre>
+<p></p>
+<p>8行对SD卡控制器的设置最直接的莫过于对寄存器S3C2410_SDICON的訪问了，为了保证后面不改变其它无关位的值，这里先读取S3C2410_SDICON中的当前值保存。</p><p></p>
+<p>10-39行是SD控制器工作状态的设定，对ioset来说。swith无疑是他最好的朋友，当MMC_POWER_UP时，SD控制器的对应管脚会得到正确的初始化。其它的如fifo也将被正确复位。</p><p></p>
+<p>41-47行就是对sd控制器时钟的设置，终于一切ioset的成功归功于49行将又一次设置的S3C2410_SDICON状态写入寄存器，从此新的控制器状态生效。</p>
+<p><br>
+</p>
+<p><br>
+</p>
+<p><strong>&nbsp; &nbsp; &nbsp; &nbsp; 那么在主机驱动层中的一个请求处理是怎么通过核心层提交到块设备请求层的呢？</strong></p>
+<p>在网上找到一副图来说明他们之间的关联和处理流程，例如以下图：<br>
+</p>
+<p><span style="font-size:18px; font-weight:bold"><img src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/20160404193348338" alt=""><br>
+</span></p>
+<p><span style="font-size:18px; font-weight:bold">三、s3cmci_request</span></p>
+<p>&nbsp; &nbsp; &nbsp; &nbsp;结构体mmc_request定义于/include/linux/mmc/core.h，它主要存放两大数据结构的指针，各自是<span style="background-color:rgb(255,255,0)">cmd</span>和<span style="background-color:rgb(255,255,0)">data</span>，顾名思意，<strong>一个为指令，一个为数据</strong></p>
+<p>&nbsp; &nbsp; &nbsp; &nbsp;也就是说。<span style="background-color:rgb(255,255,0)">mmc_request结构体存放了进行主控制器与sd卡间通信所须要的<strong>指令和数据</strong></span></p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_4_1730434" class="cpp" name="code">static void s3cmci_request(struct mmc_host *mmc, struct mmc_request *mrq)
+{
+	struct s3cmci_host *host = mmc_priv(mmc);
+
+	host-&gt;status = "mmc request";
+	host-&gt;cmd_is_stop = 0;
+	host-&gt;mrq = mrq;
+
+	if (s3cmci_card_present(mmc) == 0) {
+		dbg(host, dbg_err, "%s: no medium present
+", __func__);
+		host-&gt;mrq-&gt;cmd-&gt;error = -ENOMEDIUM;
+		mmc_request_done(mmc, mrq);
+	} else
+		s3cmci_send_request(mmc);
+}</pre>
+<p></p>
+<p>第9行推断SD卡是否还在卡槽之中，假设已经拔出，那不客气<span style="background-color:rgb(255,255,0)"><strong>mmc_request_done</strong></span>将帮您结束这个请求。怎么个解决法还是先看看<strong>mmc_request_done</strong>的代码:</p>
+<p><span style="background-color:rgb(255,255,0)"><strong>mmc_request_done</strong></span></p>
+<p>[core/core.c]</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_5_3540577" class="cpp" name="code">/**
+ *	mmc_request_done - finish processing an MMC request
+ *	@host: MMC host which completed request
+ *	@mrq: MMC request which request
+ *
+ *	MMC drivers should call this function when they have completed
+ *	their processing of a request.
+ */
+void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
+{
+	struct mmc_command *cmd = mrq-&gt;cmd;
+	int err = cmd-&gt;error;
+
+	if (err &amp;&amp; cmd-&gt;retries &amp;&amp; mmc_host_is_spi(host)) {
+		if (cmd-&gt;resp[0] &amp; R1_SPI_ILLEGAL_COMMAND)
+			cmd-&gt;retries = 0;
+	}
+
+	if (err &amp;&amp; cmd-&gt;retries &amp;&amp; !mmc_card_removed(host-&gt;card)) {
+		/*
+		 * Request starter must handle retries - see
+		 * mmc_wait_for_req_done().
+		 */
+		if (mrq-&gt;done)
+			mrq-&gt;done(mrq);
+	} else {
+		mmc_should_fail_request(host, mrq);
+
+		led_trigger_event(host-&gt;led, LED_OFF);
+
+		pr_debug("%s: req done (CMD%u): %d: %08x %08x %08x %08x
+",
+			mmc_hostname(host), cmd-&gt;opcode, err,
+			cmd-&gt;resp[0], cmd-&gt;resp[1],
+			cmd-&gt;resp[2], cmd-&gt;resp[3]);
+
+		if (mrq-&gt;data) {
+			pr_debug("%s:     %d bytes transferred: %d
+",
+				mmc_hostname(host),
+				mrq-&gt;data-&gt;bytes_xfered, mrq-&gt;data-&gt;error);
+		}
+
+		if (mrq-&gt;stop) {
+			pr_debug("%s:     (CMD%u): %d: %08x %08x %08x %08x
+",
+				mmc_hostname(host), mrq-&gt;stop-&gt;opcode,
+				mrq-&gt;stop-&gt;error,
+				mrq-&gt;stop-&gt;resp[0], mrq-&gt;stop-&gt;resp[1],
+				mrq-&gt;stop-&gt;resp[2], mrq-&gt;stop-&gt;resp[3]);
+		}
+
+		if (mrq-&gt;done)
+			mrq-&gt;done(mrq);
+
+		mmc_host_clk_release(host);
+	}
+}
+</pre>
+<p></p>
+<p>14行假设是SPI传输出现错误。并且还有重试的机会，那么仅仅要SPI不忽略这个命令，那么就还是给他重试的机会。也就到了85-91行继续调用host-&gt;ops-&gt;request(host, mrq);提交请求，否则既然是SPI忽略了这个命令。不管重试多少次都不会有结果，那么就干脆一不做二不休cmd-&gt;retries = 0;</p>
+<p>14-16行就是仅仅要设备有重生的机会就还是继续解救...</p>
+<p>26-51行假设传输无误或者重试次数到了，就会运行。当中多半是调试信息。</p>
+<p>50-51行许下的承诺就好比欠下的债。前面我们讨论mmc_wait_for_req的时候有这么两句：</p>
+<p>&nbsp;mrq-&gt;done_data = &amp;complete;<br>
+&nbsp;mrq-&gt;done = mmc_wait_done;</p>
+<p>然后我们说N年以后的某一天我们会和mmc_wait_done 再聚首，这里51 行便是调用的<span style="background-color:rgb(255,255,0)">mmc_wait_done</span>。内容例如以下：<br>
+</p>
+<p><span style="background-color:rgb(255,255,0)"><strong>mmc_wait_done</strong></span></p>
+<p>[core/core.c]</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_6_2842466" class="cpp" name="code">static void mmc_wait_done(struct mmc_request *mrq)
+{
+	complete(mrq-&gt;done_data);
+}</pre>
+<p></p>
+<p>&nbsp; &nbsp; &nbsp;还记得mmc_wait_for_req中为了你苦苦等待的那个wait_for_completion(&amp;complete)，由于等待，所以她进入了睡眠。如今事情做完了，他又一次回来调用complete(mrq-&gt;done_data)唤醒这个沉睡的内核精灵。讲到这好奇的人难免会问，那要是一直出错又该是谁来唤醒他呢？带着疑问我们继续向前.... &nbsp;&nbsp;</p>
+<p>&nbsp; &nbsp; 回到<strong>s3cmci_request,假设卡还存在的话</strong><span style="background-color:rgb(255,255,0)"><strong>s3cmci_send_reques</strong></span><strong>t</strong>将真正開始这个请求的处理。<br>
+</p>
+<p><span style="background-color:rgb(255,255,0)"><strong>s3cmci_send_reques</strong></span><span style="font-weight:bold">t</span></p>
+<p>[host/s3cmci.c]</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_7_3780557" class="cpp" name="code">static void s3cmci_send_request(struct mmc_host *mmc)
+{
+	struct s3cmci_host *host = mmc_priv(mmc);
+	struct mmc_request *mrq = host-&gt;mrq;
+	struct mmc_command *cmd = host-&gt;cmd_is_stop ?<p></p><p> mrq-&gt;stop : mrq-&gt;cmd;
+
+	host-&gt;ccnt++;
+	prepare_dbgmsg(host, cmd, host-&gt;cmd_is_stop);
+
+	/* Clear command, data and fifo status registers
+	   Fifo clear only necessary on 2440, but doesn't hurt on 2410
+	*/
+	writel(0xFFFFFFFF, host-&gt;base + S3C2410_SDICMDSTAT);
+	writel(0xFFFFFFFF, host-&gt;base + S3C2410_SDIDSTA);
+	writel(0xFFFFFFFF, host-&gt;base + S3C2410_SDIFSTA);
+
+	if (cmd-&gt;data) {
+		int res = s3cmci_setup_data(host, cmd-&gt;data);
+
+		host-&gt;dcnt++;
+
+		if (res) {
+			dbg(host, dbg_err, "setup data error %d
+", res);
+			cmd-&gt;error = res;
+			cmd-&gt;data-&gt;error = res;
+
+			mmc_request_done(mmc, mrq);
+			return;
+		}
+
+		if (s3cmci_host_usedma(host))
+			res = s3cmci_prepare_dma(host, cmd-&gt;data);
+		else
+			res = s3cmci_prepare_pio(host, cmd-&gt;data);
+
+		if (res) {
+			dbg(host, dbg_err, "data prepare error %d
+", res);
+			cmd-&gt;error = res;
+			cmd-&gt;data-&gt;error = res;
+
+			mmc_request_done(mmc, mrq);
+			return;
+		}
+	}
+
+	/* Send command */
+	s3cmci_send_command(host, cmd);
+
+	/* Enable Interrupt */
+	s3cmci_enable_irq(host, true);
+}
+</p></pre>
+<p></p>
+<p>13-15行所有写入1，是为了清除之前传输的SDI命令状态寄存器、SDI数据状态寄存器以及SDI FIFO状态寄存器。这是在一次新的传输之前所必须有的初始化工作，否则可能出现未知的状态错误。</p><p></p>
+<p>17行cmd-&gt;data实际上就是mmc_request-&gt;data，前面没少对他进行介绍。</p><p>与之相类似的还有stop-&gt;data。</p><p>这里我们姑且不说带有数据的传输过程，先来看看SD卡命令的实现。也就是1171行<strong><span style="background-color:rgb(255,255,0)">s3cmci_send_command(host, cmd)</span>;</strong></p>
+<p><strong><br>
+</strong></p>
+<p><strong>命令、数据发送流程例如以下图：</strong></p>
+<p><img src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/20160404193536105" alt=""><br>
+</p>
+<p><span style="background-color:rgb(255,255,255)"><span style="font-size:18px">1、发送命令</span></span></p>
+<p><span style="background-color:rgb(255,255,0)"><strong>s3cmci_send_command(host, cmd)</strong></span></p>
+<p>[host/s3cmci.c]</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_8_6462753" class="cpp" name="code">static void s3cmci_send_command(struct s3cmci_host *host,
+					struct mmc_command *cmd)
+{
+	u32 ccon, imsk;
+
+	imsk  = S3C2410_SDIIMSK_CRCSTATUS | S3C2410_SDIIMSK_CMDTIMEOUT |
+		S3C2410_SDIIMSK_RESPONSEND | S3C2410_SDIIMSK_CMDSENT |
+		S3C2410_SDIIMSK_RESPONSECRC;
+
+	enable_imask(host, imsk);
+
+	if (cmd-&gt;data)
+		host-&gt;complete_what = COMPLETION_XFERFINISH_RSPFIN;
+	else if (cmd-&gt;flags &amp; MMC_RSP_PRESENT)
+		host-&gt;complete_what = COMPLETION_RSPFIN;
+	else
+		host-&gt;complete_what = COMPLETION_CMDSENT;
+
+	writel(cmd-&gt;arg, host-&gt;base + S3C2410_SDICMDARG);
+
+	ccon  = cmd-&gt;opcode &amp; S3C2410_SDICMDCON_INDEX;
+	ccon |= S3C2410_SDICMDCON_SENDERHOST | S3C2410_SDICMDCON_CMDSTART;
+
+	if (cmd-&gt;flags &amp; MMC_RSP_PRESENT)
+		ccon |= S3C2410_SDICMDCON_WAITRSP;
+
+	if (cmd-&gt;flags &amp; MMC_RSP_136)
+		ccon |= S3C2410_SDICMDCON_LONGRSP;
+
+	writel(ccon, host-&gt;base + S3C2410_SDICMDCON);
+}
+</pre>
+<p></p>
+<p>6-8行是<strong>使能对应的中断，当中包含CRC校验错误、命令超时、收到命令响应</strong>等等。</p><p>详细的中断屏蔽寄存器的内容能够參考S3C2440用户手冊。</p>
+<p>12-17行实际上指当前的这个命令结束时候应该所处的状态。中断处理函数将实际硬件的完毕情况与这个状态相比較。终于得到这个命令运行的结果。而cmd-&gt;flags正是前面提交命令之前依据不同命令的实际情况来设置的，比方具有应答数据的命令可能须要设置cmd-&gt;flags |= MMC_RSP_PRESENT。然后相应的结束状态也就应该是COMPLETION_RSPFIN收到应答。</p><p>前面说过host-&gt;complete_what是个枚举类型的变量包括了整个命令过程的各个阶段，内容例如以下：</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_9_1304540" class="cpp" name="code">enum s3cmci_waitfor {  
+    COMPLETION_NONE,  
+    COMPLETION_FINALIZE,  
+    COMPLETION_CMDSENT,  
+    COMPLETION_RSPFIN,  
+    COMPLETION_XFERFINISH,  
+    COMPLETION_XFERFINISH_RSPFIN,  
+};  </pre>
+<p></p>
+<p>一般的命令可能无应答阶段，我们默认传输数据正确完毕以后即觉得命令运行完毕也就是17行相应的host-&gt;complete_what = COMPLETION_CMDSENT;</p>
+<p>19行是对命令命令參数寄存器的设置。cmd-&gt;arg是一个32bit的整数。这里如实填写就可以。</p><p></p>
+<p>21行之后的内容就是对<strong>控制寄存器的设置</strong>了。因为控制寄存器比較重要，这里列出他寄存器位的信息例如以下：对比上表应该不难分析函数中所设置的每一位的详细含义，这里就不再一一解释了。SDICmdCon[8]的置位使得SD控制器開始发送命令。回到s3cmci_send_request....</p>
+<p>前一段第50行s3cmci_enable_irq(host, true); 就是<strong>使能SDI 控制器的中断</strong>。</p><p>然而s3cmci_send_command 中间的944 行设置imr|=S3C2410_SDIIMSK_CMDSENT。命中注定命令发出以后产生一个对应的中断，接下来就进入probe 阶段所注冊的那个SDI 中断<span style="background-color:rgb(255,255,0)">request_irq(host-&gt;irq, s3cmci_irq,
+ 0, DRIVER_NAME, host)</span>。<br>
+</p>
+<p><span style="background-color:rgb(255,255,0)"><strong>request_irq(host-&gt;irq, s3cmci_irq, 0, DRIVER_NAME, host)</strong></span></p>
+<p>[host/s3cmci.c]</p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_10_4750886" class="cpp" name="code">/*
+ * ISR for SDI Interface IRQ
+ * Communication between driver and ISR works as follows:
+ *   host-&gt;mrq 			points to current request
+ *   host-&gt;complete_what	Indicates when the request is considered done
+ *     COMPLETION_CMDSENT	  when the command was sent
+ *     COMPLETION_RSPFIN          when a response was received
+ *     COMPLETION_XFERFINISH	  when the data transfer is finished
+ *     COMPLETION_XFERFINISH_RSPFIN both of the above.
+ *   host-&gt;complete_request	is the completion-object the driver waits for
+ *
+ * 1) Driver sets up host-&gt;mrq and host-&gt;complete_what
+ * 2) Driver prepares the transfer
+ * 3) Driver enables interrupts
+ * 4) Driver starts transfer
+ * 5) Driver waits for host-&gt;complete_rquest
+ * 6) ISR checks for request status (errors and success)
+ * 6) ISR sets host-&gt;mrq-&gt;cmd-&gt;error and host-&gt;mrq-&gt;data-&gt;error
+ * 7) ISR completes host-&gt;complete_request
+ * 8) ISR disables interrupts
+ * 9) Driver wakes up and takes care of the request
+ *
+ * Note: "-&gt;error"-fields are expected to be set to 0 before the request
+ *       was issued by mmc.c - therefore they are only set, when an error
+ *       contition comes up
+ */
+
+static irqreturn_t s3cmci_irq(int irq, void *dev_id)
+{
+	struct s3cmci_host *host = dev_id;
+	struct mmc_command *cmd;
+	u32 mci_csta, mci_dsta, mci_fsta, mci_dcnt, mci_imsk;
+	u32 mci_cclear = 0, mci_dclear;
+	unsigned long iflags;
+
+	mci_dsta = readl(host-&gt;base + S3C2410_SDIDSTA);
+	mci_imsk = readl(host-&gt;base + host-&gt;sdiimsk);
+
+	if (mci_dsta &amp; S3C2410_SDIDSTA_SDIOIRQDETECT) {
+		if (mci_imsk &amp; S3C2410_SDIIMSK_SDIOIRQ) {
+			mci_dclear = S3C2410_SDIDSTA_SDIOIRQDETECT;
+			writel(mci_dclear, host-&gt;base + S3C2410_SDIDSTA);
+
+			mmc_signal_sdio_irq(host-&gt;mmc);
+			return IRQ_HANDLED;
+		}
+	}
+
+	spin_lock_irqsave(&amp;host-&gt;complete_lock, iflags);
+
+	mci_csta = readl(host-&gt;base + S3C2410_SDICMDSTAT);
+	mci_dcnt = readl(host-&gt;base + S3C2410_SDIDCNT);
+	mci_fsta = readl(host-&gt;base + S3C2410_SDIFSTA);
+	mci_dclear = 0;
+
+	if ((host-&gt;complete_what == COMPLETION_NONE) ||
+	    (host-&gt;complete_what == COMPLETION_FINALIZE)) {
+		host-&gt;status = "nothing to complete";
+		clear_imask(host);
+		goto irq_out;
+	}
+
+	if (!host-&gt;mrq) {
+		host-&gt;status = "no active mrq";
+		clear_imask(host);
+		goto irq_out;
+	}
+
+	cmd = host-&gt;cmd_is_stop ?<p></p><p> host-&gt;mrq-&gt;stop : host-&gt;mrq-&gt;cmd;
+
+	if (!cmd) {
+		host-&gt;status = "no active cmd";
+		clear_imask(host);
+		goto irq_out;
+	}
+
+	if (!s3cmci_host_usedma(host)) {
+		if ((host-&gt;pio_active == XFER_WRITE) &amp;&amp;
+		    (mci_fsta &amp; S3C2410_SDIFSTA_TFDET)) {
+
+			disable_imask(host, S3C2410_SDIIMSK_TXFIFOHALF);
+			tasklet_schedule(&amp;host-&gt;pio_tasklet);
+			host-&gt;status = "pio tx";
+		}
+
+		if ((host-&gt;pio_active == XFER_READ) &amp;&amp;
+		    (mci_fsta &amp; S3C2410_SDIFSTA_RFDET)) {
+
+			disable_imask(host,
+				      S3C2410_SDIIMSK_RXFIFOHALF |
+				      S3C2410_SDIIMSK_RXFIFOLAST);
+
+			tasklet_schedule(&amp;host-&gt;pio_tasklet);
+			host-&gt;status = "pio rx";
+		}
+	}
+
+	if (mci_csta &amp; S3C2410_SDICMDSTAT_CMDTIMEOUT) {
+		dbg(host, dbg_err, "CMDSTAT: error CMDTIMEOUT
+");
+		cmd-&gt;error = -ETIMEDOUT;
+		host-&gt;status = "error: command timeout";
+		goto fail_transfer;
+	}
+
+	if (mci_csta &amp; S3C2410_SDICMDSTAT_CMDSENT) {
+		if (host-&gt;complete_what == COMPLETION_CMDSENT) {
+			host-&gt;status = "ok: command sent";
+			goto close_transfer;
+		}
+
+		mci_cclear |= S3C2410_SDICMDSTAT_CMDSENT;
+	}
+
+	if (mci_csta &amp; S3C2410_SDICMDSTAT_CRCFAIL) {
+		if (cmd-&gt;flags &amp; MMC_RSP_CRC) {
+			if (host-&gt;mrq-&gt;cmd-&gt;flags &amp; MMC_RSP_136) {
+				dbg(host, dbg_irq,
+				    "fixup: ignore CRC fail with long rsp
+");
+			} else {
+				/* note, we used to fail the transfer
+				 * here, but it seems that this is just
+				 * the hardware getting it wrong.
+				 *
+				 * cmd-&gt;error = -EILSEQ;
+				 * host-&gt;status = "error: bad command crc";
+				 * goto fail_transfer;
+				*/
+			}
+		}
+
+		mci_cclear |= S3C2410_SDICMDSTAT_CRCFAIL;
+	}
+
+	if (mci_csta &amp; S3C2410_SDICMDSTAT_RSPFIN) {
+		if (host-&gt;complete_what == COMPLETION_RSPFIN) {
+			host-&gt;status = "ok: command response received";
+			goto close_transfer;
+		}
+
+		if (host-&gt;complete_what == COMPLETION_XFERFINISH_RSPFIN)
+			host-&gt;complete_what = COMPLETION_XFERFINISH;
+
+		mci_cclear |= S3C2410_SDICMDSTAT_RSPFIN;
+	}
+
+	/* errors handled after this point are only relevant
+	   when a data transfer is in progress */
+
+	if (!cmd-&gt;data)
+		goto clear_status_bits;
+
+	/* Check for FIFO failure */
+	if (host-&gt;is2440) {
+		if (mci_fsta &amp; S3C2440_SDIFSTA_FIFOFAIL) {
+			dbg(host, dbg_err, "FIFO failure
+");
+			host-&gt;mrq-&gt;data-&gt;error = -EILSEQ;
+			host-&gt;status = "error: 2440 fifo failure";
+			goto fail_transfer;
+		}
+	} else {
+		if (mci_dsta &amp; S3C2410_SDIDSTA_FIFOFAIL) {
+			dbg(host, dbg_err, "FIFO failure
+");
+			cmd-&gt;data-&gt;error = -EILSEQ;
+			host-&gt;status = "error:  fifo failure";
+			goto fail_transfer;
+		}
+	}
+
+	if (mci_dsta &amp; S3C2410_SDIDSTA_RXCRCFAIL) {
+		dbg(host, dbg_err, "bad data crc (outgoing)
+");
+		cmd-&gt;data-&gt;error = -EILSEQ;
+		host-&gt;status = "error: bad data crc (outgoing)";
+		goto fail_transfer;
+	}
+
+	if (mci_dsta &amp; S3C2410_SDIDSTA_CRCFAIL) {
+		dbg(host, dbg_err, "bad data crc (incoming)
+");
+		cmd-&gt;data-&gt;error = -EILSEQ;
+		host-&gt;status = "error: bad data crc (incoming)";
+		goto fail_transfer;
+	}
+
+	if (mci_dsta &amp; S3C2410_SDIDSTA_DATATIMEOUT) {
+		dbg(host, dbg_err, "data timeout
+");
+		cmd-&gt;data-&gt;error = -ETIMEDOUT;
+		host-&gt;status = "error: data timeout";
+		goto fail_transfer;
+	}
+
+	if (mci_dsta &amp; S3C2410_SDIDSTA_XFERFINISH) {
+		if (host-&gt;complete_what == COMPLETION_XFERFINISH) {
+			host-&gt;status = "ok: data transfer completed";
+			goto close_transfer;
+		}
+
+		if (host-&gt;complete_what == COMPLETION_XFERFINISH_RSPFIN)
+			host-&gt;complete_what = COMPLETION_RSPFIN;
+
+		mci_dclear |= S3C2410_SDIDSTA_XFERFINISH;
+	}
+
+clear_status_bits:
+	writel(mci_cclear, host-&gt;base + S3C2410_SDICMDSTAT);
+	writel(mci_dclear, host-&gt;base + S3C2410_SDIDSTA);
+
+	goto irq_out;
+
+fail_transfer:
+	host-&gt;pio_active = XFER_NONE;
+
+close_transfer:
+	host-&gt;complete_what = COMPLETION_FINALIZE;
+
+	clear_imask(host);
+	tasklet_schedule(&amp;host-&gt;pio_tasklet);
+
+	goto irq_out;
+
+irq_out:
+	dbg(host, dbg_irq,
+	    "csta:0x%08x dsta:0x%08x fsta:0x%08x dcnt:0x%08x status:%s.
+",
+	    mci_csta, mci_dsta, mci_fsta, mci_dcnt, host-&gt;status);
+
+	spin_unlock_irqrestore(&amp;host-&gt;complete_lock, iflags);
+	return IRQ_HANDLED;
+
+}
+</p></pre>
+<p></p>
+<p><span style="background-color:rgb(255,255,255)">36-48行是推断SDIO所触发的中断，与我们说说的无关。飘过....</span></p>
+<p><span style="background-color:rgb(255,255,255)">30-34行分别读取命令状态、尚未完毕传输的数据大小以及FIFO的状态的值。</span></p>
+<p><span style="background-color:rgb(255,255,255)">56-61行就是之前所分析的host-&gt;complete_what。假设设备无欲无求host-&gt;complete_what&nbsp;== COMPLETION_NONE，即使连最主要的命令发送也不要求完毕的话。那就没什么意义了。直接清除IMASK。返回。</span></p><p><br>
+</p>
+<p><span style="background-color:rgb(255,255,255)"></span></p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_11_2416572" class="cpp" name="code">static inline void clear_imask(struct s3cmci_host *host)
+{
+	u32 mask = readl(host-&gt;base + host-&gt;sdiimsk);
+
+	/* preserve the SDIO IRQ mask state */
+	mask &amp;= S3C2410_SDIIMSK_SDIOIRQ;
+	writel(mask, host-&gt;base + host-&gt;sdiimsk);
+}
+</pre>
+<p></p>
+<p><span style="background-color:rgb(255,255,255)">上面的代码仅仅保留了SDIO IRQ状态，其它的中断都是被屏蔽了的。由此足见其对SDIO设备的偏心程度。</span></p>
+<p><span style="background-color:rgb(255,255,255)">585-589 行尽然玩丢了host-&gt;mrq。不管是命令还是数据请求，我们都是递交了struct&nbsp;mmc_request结构的，所以驱动非常气愤，直接返回。</span></p>
+<p><span style="background-color:rgb(255,255,255)">591行前面我们看到struct mmc_request中包括了两种类型的struct mmc_cmd一个是所谓的cmd另外一个就是stop了，当然选择哪一个也不是他自己说来算了。当然有主机host-<br>
+&gt;cmd_is_stop来决定了。</span></p><p></p>
+<p><span style="background-color:rgb(255,255,255)">63-67行是PIO模式下传输数据的，我们姑且先放着，等说完CMD回头再看。</span></p>
+<p>98-103行命令超时以后就会跳转到fail_transfer，至于fail_transfer又干了些啥好事我们走到那里了再说，继续前进...</p>
+<p><span style="background-color:rgb(255,255,255)">105-109行命令发送成功以后所产生的中断，假设host-&gt;complete_what也正好仅仅要求传输成功即COMPLETION_CMDSENT，那正好完毕工作，goto close_transfer。</span></p>
+<p><span style="background-color:rgb(255,255,255)">114-129行是CRC错误，忽略。</span></p>
+<p><span style="background-color:rgb(255,255,255)">134-138行命令对应接收成功，那么依然goto close_transfer。</span></p>
+<p><span style="background-color:rgb(255,255,255)">140-143行至今尚未发现一个所谓的COMPLETION_XFERFINISH_RSPFIN最多也就传输数据成功那么改动一下这个脑残host-&gt;complete_what =COMPLETION_XFERFINISH;</span></p>
+<p><span style="background-color:rgb(255,255,255)">149-150行假设没有传输数据，那么接下来就能够进行状态清理工作了。</span></p><p></p>
+<p><span style="background-color:rgb(255,255,255)">153-200行是检查FIFO信息的，回头说到PIO传输的时候在来分析它。</span></p>
+<p><span style="background-color:rgb(255,255,255)">203-204行意图非常明白，显然是毁尸灭迹，清除状态。最后能够看到不管是先前的fail_transfer:还是后来的close_transfer，最总都会去调用</span></p>
+<p><span style="background-color:rgb(255,255,255)">215行的tasklet_schedule(&amp;host-&gt;pio_tasklet)。是什么赋予这个函数如此强大的魅力。且听下回分解...</span></p>
+<p><strong><span style="font-size:18px"><br>
+</span></strong></p>
+<p><strong><span style="font-size:18px">2、传输数据&nbsp;</span></strong><span style="font-size:14px; background-color:rgb(255,255,0)"><strong>s3cmci_setup_data</strong></span></p>
+<p>&nbsp; &nbsp; &nbsp; &nbsp; 是时候该看点实际的传输数据了。前面说过s3cmci_send_request中的<span style="background-color:rgb(255,255,0)">if (cmd-&gt;data)</span>是区分命令是否有数据阶段的关键标志。假设有传输数据的，那么就到了<br>
+<span style="background-color:rgb(255,255,0)"><strong>s3cmci_setup_data</strong></span>。</p><p></p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_12_5704241" class="cpp" name="code">static int s3cmci_setup_data(struct s3cmci_host *host, struct mmc_data *data)
+{
+	u32 dcon, imsk, stoptries = 3;
+
+	/* write DCON register */
+
+	if (!data) {
+		writel(0, host-&gt;base + S3C2410_SDIDCON);
+		return 0;
+	}
+
+	if ((data-&gt;blksz &amp; 3) != 0) {
+		/* We cannot deal with unaligned blocks with more than
+		 * one block being transferred. */
+
+		if (data-&gt;blocks &gt; 1) {
+			pr_warning("%s: can't do non-word sized block transfers (blksz %d)
+", __func__, data-&gt;blksz);
+			return -EINVAL;
+		}
+	}
+
+	while (readl(host-&gt;base + S3C2410_SDIDSTA) &amp;
+	       (S3C2410_SDIDSTA_TXDATAON | S3C2410_SDIDSTA_RXDATAON)) {
+
+		dbg(host, dbg_err,
+		    "mci_setup_data() transfer stillin progress.
+");
+
+		writel(S3C2410_SDIDCON_STOP, host-&gt;base + S3C2410_SDIDCON);
+		s3cmci_reset(host);
+
+		if ((stoptries--) == 0) {
+			dbg_dumpregs(host, "DRF");
+			return -EINVAL;
+		}
+	}
+
+	dcon  = data-&gt;blocks &amp; S3C2410_SDIDCON_BLKNUM_MASK;
+
+	if (s3cmci_host_usedma(host))
+		dcon |= S3C2410_SDIDCON_DMAEN;
+
+	if (host-&gt;bus_width == MMC_BUS_WIDTH_4)
+		dcon |= S3C2410_SDIDCON_WIDEBUS;
+
+	if (!(data-&gt;flags &amp; MMC_DATA_STREAM))
+		dcon |= S3C2410_SDIDCON_BLOCKMODE;
+
+	if (data-&gt;flags &amp; MMC_DATA_WRITE) {
+		dcon |= S3C2410_SDIDCON_TXAFTERRESP;
+		dcon |= S3C2410_SDIDCON_XFER_TXSTART;
+	}
+
+	if (data-&gt;flags &amp; MMC_DATA_READ) {
+		dcon |= S3C2410_SDIDCON_RXAFTERCMD;
+		dcon |= S3C2410_SDIDCON_XFER_RXSTART;
+	}
+
+	if (host-&gt;is2440) {
+		dcon |= S3C2440_SDIDCON_DS_WORD;
+		dcon |= S3C2440_SDIDCON_DATSTART;
+	}
+
+	writel(dcon, host-&gt;base + S3C2410_SDIDCON);
+
+	/* write BSIZE register */
+
+	writel(data-&gt;blksz, host-&gt;base + S3C2410_SDIBSIZE);
+
+	/* add to IMASK register */
+	imsk = S3C2410_SDIIMSK_FIFOFAIL | S3C2410_SDIIMSK_DATACRC |
+	       S3C2410_SDIIMSK_DATATIMEOUT | S3C2410_SDIIMSK_DATAFINISH;
+
+	enable_imask(host, imsk);
+
+	/* write TIMER register */
+
+	if (host-&gt;is2440) {
+		writel(0x007FFFFF, host-&gt;base + S3C2410_SDITIMER);
+	} else {
+		writel(0x0000FFFF, host-&gt;base + S3C2410_SDITIMER);
+
+		/* FIX: set slow clock to prevent timeouts on read */
+		if (data-&gt;flags &amp; MMC_DATA_READ)
+			writel(0xFF, host-&gt;base + S3C2410_SDIPRE);
+	}
+
+	return 0;
+}
+</pre>
+<p>7-10行假设data不存在。接下来就无事可做了。</p>
+<p>12-20行块大小是4字节对齐的，假设data-&gt;blksz不满足，那么返回错误。</p>
+<p>22-35行读取数据状态寄存器，假设正在发送或接收数据，则s3cmci_reset(host);复位SD控制器。</p><p></p>
+<pre code_snippet_id="1632311" snippet_file_name="blog_20160402_13_1974487" class="cpp" name="code">static void s3cmci_reset(struct s3cmci_host *host)
+{
+	u32 con = readl(host-&gt;base + S3C2410_SDICON);
+	
+	con |= S3C2440_SDICON_SDRESET;
+	writel(con, host-&gt;base + S3C2410_SDICON);
+}</pre>
+<p></p>
+<p>37-63行依据数据特征、主机总线宽度等信息设置数据控制寄存器。</p>
+<p>67行设置SD控制器块大小寄存器。这是上层设置下来的值，一般为512。</p><p></p>
+<p>70-73行设置中断屏蔽寄存器，使能传输数据完毕中断、超时等。</p>
+<p>77-84行是关于读写超时的处理。接着返回到s3cmci_send_request....</p>
+<p>假设不出什么问题。应该就到了85行。</p><p></p>
+<p>s3cmci_prepare_dma(host, cmd-&gt;data);是DMA传输的处理，</p>
+<p>s3cmci_prepare_pio(host, cmd-&gt;data);是PIO方式的处理，以下我们先来关注PIO方式的传输数据。<br>
+</p>
+<p><br>
+</p>
+<p></p>
+<div style="top:4346px">﻿﻿</div>
+   
+</div>
+</div>
+</span>
+          </li>
+
+          <li class="list-group-item ul-li">
+
+            <b>相关阅读:</b><br>
+            <nobr>
+              <a href="http://t.zoukankan.com/guge-94-p-10555653.html" target="_blank">队列与堆栈</a>
+                <br><a href="http://t.zoukankan.com/guge-94-p-10544829.html" target="_blank">Python中的内置函数</a>
+                <br><a href="http://t.zoukankan.com/guge-94-p-10524059.html" target="_blank">Centos 7 最小化部署svn版本控制(svn协议)</a>
+                <br><a href="http://t.zoukankan.com/zengsf-p-7709614.html" target="_blank">Android中的一些简单的adb命令</a>
+                <br><a href="http://t.zoukankan.com/zengsf-p-7669093.html" target="_blank">liunx服务程序的安装及配置</a>
+                <br><a href="http://t.zoukankan.com/zengsf-p-7668886.html" target="_blank">liunx中安装包及其应用</a>
+                <br><a href="http://t.zoukankan.com/zengsf-p-7667132.html" target="_blank">liunx网络基本命令</a>
+                <br><a href="http://t.zoukankan.com/zengsf-p-7663637.html" target="_blank">liunx系统和其它的基本命令</a>
+                <br><a href="http://t.zoukankan.com/zengsf-p-7662891.html" target="_blank">liunx用户管理的基本命令</a>
+                <br><a href="http://t.zoukankan.com/zengsf-p-7662708.html" target="_blank">liunx的磁盘管理的基本命令</a>
+                <br>            </nobr>
+          </li>
+          <li class="list-group-item from-a mb-2">
+            原文地址：https://www.cnblogs.com/tlnshuju/p/7360326.html
+          </li>
+
+        </ul>
+      </div>
+
+
+      <!-- 右侧开始 -->
+      <div class="col-lg-4 col-sm-12">
+        <ul class="list-group" style="word-break:break-all;">
+          <li class="list-group-item ul-li-bg" aria-current="true">
+            最新文章
+          </li>
+          <li class="list-group-item ul-li">
+            <nobr>
+              <a href="http://t.zoukankan.com/zllwxm123-p-7354919.html" target="_blank">AtCoder Beginner Contest 070</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7354887.html" target="_blank">A. Arya and Bran(水题)</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7354868.html" target="_blank">B. Game of the Rows</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7354826.html" target="_blank">C. Journey(dfs)</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7351306.html" target="_blank">小C的倍数问题</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7351286.html" target="_blank">1004 n^n的末位数字</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7341912.html" target="_blank">1001 数组中和等于K的数对</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7341898.html" target="_blank">1002 数塔取数问题</a>
+                <br><a href="http://t.zoukankan.com/zllwxm123-p-7341888.html" target="_blank">1003 阶乘后面0的数量</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10965562.html" target="_blank">gdb暂停或恢复程序的运行</a>
+                <br>            </nobr>
+          </li>
+        </ul>
+
+        <ul class="list-group pt-2" style="word-break:break-all;">
+          <li class="list-group-item ul-li-bg" aria-current="true">
+            热门文章
+          </li>
+          <li class="list-group-item ul-li">
+            <nobr>
+              <a href="http://t.zoukankan.com/schips-p-10962029.html" target="_blank">[Lua]LuaAPI整理</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10958325.html" target="_blank">Linux编程之select</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10956979.html" target="_blank">高性能后台服务器架构设计</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10956969.html" target="_blank">一款经典的服务器架构设计</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10956961.html" target="_blank">【转】大并发服务器框架设计</a>
+                <br><a href="http://t.zoukankan.com/schips-p-12995355.html" target="_blank">STM32的内存管理（转）</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10955024.html" target="_blank">【转载】STM32 IAP 在线升级详解</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10928753.html" target="_blank">简单理解算法篇--摊还分析</a>
+                <br><a href="http://t.zoukankan.com/schips-p-10926795.html" target="_blank">关于FSM的C语言实现与详解</a>
+                <br><a href="http://t.zoukankan.com/guge-94-p-10566258.html" target="_blank">老男孩Python全栈学习 S9 日常作业 001</a>
+                <br>            </nobr>
+          </li>
+        </ul>
+
+      </div>
+    </div>
+  </div>
+
+
+  <!-- 栅栏结束 -->
+
+  <div class="text-center p-3">
+    <span>走看看 - 开发者的网上家园</span>
+    <!-- 引入底部 -->
+    <!-- 底部开始 -->
+
+  <span>
+    <script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/push.js.下载"></script><script type="text/javascript">document.write(unescape("%3Cspan id='cnzz_stat_icon_1278882432'%3E%3C/span%3E%3Cscript src='https://s4.cnzz.com/z_stat.php%3Fid%3D1278882432%26show%3Dpic1' type='text/javascript'%3E%3C/script%3E"));</script><span id="cnzz_stat_icon_1278882432"><a href="https://www.cnzz.com/stat/website.php?web_id=1278882432" target="_blank" title="站长统计"><img border="0" hspace="0" vspace="0" src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/pic1.gif"></a></span><script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/z_stat.php" type="text/javascript"></script><script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/core.php" charset="utf-8" type="text/javascript"></script>
+  </span>
+
+<!-- 底部结束 -->
+
+<!-- 百度自动推送js -->
+<script>
+  (function(){
+    var bp = document.createElement('script');
+    var curProtocol = window.location.protocol.split(':')[0];
+    if (curProtocol === 'https'){
+     bp.src = 'https://zz.bdstatic.com/linksubmit/push.js';
+   }
+   else{
+    bp.src = 'http://push.zhanzhang.baidu.com/push.js';
+  }
+  var s = document.getElementsByTagName("script")[0];
+  s.parentNode.insertBefore(bp, s);
+})();
+</script>
+<!-- 百度自动推送js -->
+  </div>
+
+  <!-- Optional JavaScript -->
+  <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+  <script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/jquery.slim.min.js.下载" integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n" crossorigin="anonymous"></script>
+  <script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/popper.min.js.下载" integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo" crossorigin="anonymous"></script>
+  <script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/bootstrap.min.js.下载" integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6" crossorigin="anonymous"></script>
+  <script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/blog-common.min.js.下载"></script>
+  <script src="./Linux SD卡驱动开发(四) —— SD 控制器之真正的硬件操作 - 走看看_files/clipboard.min.js.下载"></script>
+
+  <script type="text/javascript">isPoped = true;</script>
+  <a href="http://t.zoukankan.com/tlnshuju-p-7360326.html" id="redirect_url"></a>
+  <a href="http://t.zoukankan.com/tlnshuju-p-7360326.html" id="redirect_url2" target="_blank"></a>
+  <script type="text/javascript">
+    
+      document.onclick = function()
+      {
+        if (!isPoped)
+        {       
+          document.getElementById("redirect_url").click();
+          document.getElementById("redirect_url2").click();
+                    isPoped = true;
+                  }
+      }
+    </script>
+
+
+</body></html>

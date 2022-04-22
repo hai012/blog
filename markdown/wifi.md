@@ -3418,7 +3418,7 @@ retrieveNetworkPtr()返回当前networkid对应的wpa_ssid结构体指针
 
 
 
-##### wpa_supplicant_deathenticate
+##### wpa_supplicant_deauthenticate
 
 
 
@@ -4020,29 +4020,29 @@ https://blog.csdn.net/ly131420/article/details/38400583
 
 ## 10 wifi驱动(rk平台)
 
-platform_device/platform_drive
-
-
-
 device_add
 
 ```
-platform_device_register//1 (2) 3
-mmc_host_add//1 2
-device_create//1 2
-mmc_add_card  //1 (2) 3
-
-
 int device_add(struct device *dev) {
 
 1、dev->parent   //parent必须不为空，用于在/sys/devices/${dev->parent}下面创建子设备
 
-2、device_add_class_symlinks(dev);//dev->class，class可以为空，如果不为空则在/sys/class/${dev->class}下创建符号连接并指向在/sys/devices/${dev->parent}下创建的子设备。
+2、dev->class   //class可以为空，如果不为空则调用device_add_class_symlinks(dev)在/sys/class/${dev->class}下创建符号连接并指向在/sys/devices/${dev->parent}下创建的子设备。
 
-3、bus_add_device(dev);//dev->bus，bus可以为空，如果不为空则在/sys/bus/${dev->bus}/devices/下创建符号连接并指向在/sys/devices/${dev->parent}下创建的子设备，并匹配dev->bus上的driver如果匹配则调用driver的probe。
+3、dev->bus    //bus可以为空，如果不为空则调用bus_add_device(dev)在/sys/bus/${dev->bus}/devices/下创建符号连接并指向在/sys/devices/${dev->parent}下创建的子设备，并调用.match函数指针去匹配dev->bus上的driver如果匹配则调用driver的probe。
 
 }
 ```
+
+
+
+int platform_device_register(struct platform_device *pdev)                                                                                                            //1 (2) 3
+
+struct device *device_create(struct class *class, struct device *parent,dev_t devt, void *drvdata, const char *fmt, ...)       //1 2
+
+int mmc_add_host(struct mmc_host *host)                                                                                                                                       //1 2
+
+int mmc_add_card(struct mmc_card *card)                                                                                                                                      //1 (2) 3
 
 
 
@@ -4130,11 +4130,11 @@ kernel/arch/arm64/boot/dts/rockchip/rk3568.dtsi
 
 设备树被解析后生成三个平台设备，对应
 
-/sys/devices/platform/dwmmc@fe000000
+/sys/devices/platform/fe000000
 
-/sys/devices/platform/dwmmc@fe2b0000
+/sys/devices/platform/fe2b0000
 
-/sys/devices/platform/dwmmc@fe2c0000
+/sys/devices/platform/fe2c0000
 
 三个平台设备compatible有一项为"rockchip,rk3288-dw-mshc"，与如下驱动匹配(调三次probe，每次调用时传入的struct platform_device *pdev指向不同的平台设备)：
 
@@ -4273,7 +4273,7 @@ mmc_alloc_host函数关键部分在
 
 dev和class_dev是struct device结构体
 
-**dev是前面dw_mmc-rockchip驱动匹配的那个平台设备的dev(即pdev->dev)，该设备由与驱动compatible匹配的设备树节点解析生成，在/sys/devices下对应节点/sys/devices/platform/dwmmc@xxxxxxxx，在/sys/class下没有对应节点，在/sys/bus下对应节点 /sys/bus/platform/devices/dwmmc@xxxxxxxx。**
+**dev是前面dw_mmc-rockchip驱动匹配的那个平台设备的dev(即pdev->dev)，该设备由与驱动compatible匹配的设备树节点解析生成，在/sys/devices下对应节点/sys/devices/platform/fe2c0000，在/sys/class下没有对应节点，在/sys/bus下对应节点 /sys/bus/platform/devices/fe2c0000。**
 
 mmc_host_class定义在kernel/drivers/mmc/core/host.c：
 
@@ -4281,7 +4281,7 @@ mmc_host_class定义在kernel/drivers/mmc/core/host.c：
 
 
 
-**返回到dw_mci_init_slot函数中，后续调用在mmc_add_host函数，在mmc_add_host函数中调用device_add函数时就会在/sys/devices/platform/dwmmc@xxxxxxxx/下创建${class_dev.name}节点，对应dev的子设备。此外还会在/sys/class/下创建${mmc_host_class.name}节点。且没有在/sys/bus下创建节点，因为class_dev.bus没有指定。**
+**返回到dw_mci_init_slot函数中，后续调用在mmc_add_host函数，在mmc_add_host函数中调用device_add函数时就会在/sys/devices/platform/fe2c0000/下创建${class_dev.name}节点，对应dev的子设备。此外还会在/sys/class/下创建${mmc_host_class.name}节点。且没有在/sys/bus下创建节点，因为class_dev.bus没有指定。**
 
 
 
@@ -4337,15 +4337,19 @@ mmc_rescan_try_freq函数十分关键，首先调用mmc_power_up扫卡初始化�
 
 
 
-mmc_power_up     sdmmc控制器的对应管脚初始化
+mmc_power_up     使能对应SD/sdio卡的电源/reset管脚，初始化sd控制器host->ios（位宽为1bit，chipselect=MMC_CS_DONTCARE...etc)
 
-sdio_reset                发送CMD52读取寄存器，修改
 
-mmc_go_idle
 
-mmc_send_if_cond
+sdio_reset                发送CMD52
 
-mmc_send_if_cond
+
+
+mmc_go_idle           发送CMD0
+
+
+
+mmc_send_if_cond   发送CMD8
 
 
 
@@ -4364,6 +4368,12 @@ mmc_send_if_cond
 
 
 ### 10.3 mmc_card&&sdio_func
+
+
+
+
+
+
 
 mmc_attach_sdio依次调用：
 
@@ -4414,6 +4424,27 @@ sdio_add_func
 ![image-20220309110104968](wifi.assets/image-20220309110104968.png)
 
 
+注意在mmc_sdio_init_card中还会发送一些CMD命令初始化SDIO卡，关于CMD命令和SD/SDIO协议可以参考如下：
+
+
+
+http://cache.baiducontent.com/c?m=P-3DiAQagve1j4XgjT3V-xdesQ3AModAY8emxErvqgFZKKE3cKT7vkGXiF3Qim2kehd6KD7Lycj4rekIXNYnHLYysA3u2t1vsx-zd2rar93uWYHlpEoJALt1yjkNRty78TvFSadPGh07qvDTsCpRma&p=9e6cc7048cdb12a05abd9b7959&newp=8f63c54ad1d512a05aaf82375153d8274e3987683ac3864e1290c408d23f061d4863e1be2724100fd4c27c6c02ac495bebf7347523454df6cc8a871d81ed84&s=c0c08920eee6f233&user=baidu&fm=sc&query=SD%B2%D9%D7%F7%C1%F7%B3%CC&qid=9e63101000003ab6&p1=3
+
+http://cache.baiducontent.com/c?m=BdymGqIhjKkgm-lg-khBjRWRhbJconUdigQ-ao-2uZuwU8B0guS1O4BqSxmP6GoK9QErj8aB_kOgQ_s-of39tydwCAs0VMjTPV6FHKB1IHZqe5yux9HVLbwabc9iyrOI3HrmfJF-E9G7Pn9XvKNObK&p=882a9e4e9cdd52fc57ef8a3e4e5d&newp=882a9e4e8d891abc09fbc7710f5592695d0fc20e3fd4d201298ffe0cc4241a1a1a3aecbe25271202d2c5796406af4f57edf63d723d0034f1f689df08d2ecce7e74c27c27210a&s=37693cfc748049e4&user=baidu&fm=sc&query=SDIO%B3%F5%CA%BC%BB%AF&qid=9efb928a00043f5e&p1=8
+
+http://cache.baiducontent.com/c?m=mcfEJh7RFRjfXx-1MaisCOPwfl_C7lE3OGE7d5zxhv0KJatpnWetxT43MYZMAvJTuhGvnrTngY3QSdIlyqIcsIp8atm8sbN1uJ468wyQoVeBsvzMdheUe8NtdIuUF0hg4ZSiC-tGyP5zMBTPO4-5HfmqA-ArqtfZbYvLoTIQYJdqs4IQwAdWRpBIc986gWWA&p=8b2a971d93dd15fe04bd9b7f1b&newp=87769a47808a1ffe01bd9b7f4253d8224216ed643ad4c44324b9d71fd325001c1b69e6b922241300d7c07b6c0bac4d58e1f33278341766dada9fca458ae7c47e66d6766d&s=ad61ab143223efbc&user=baidu&fm=sc&query=mmc%5Fpower%5Fup&qid=cae403d500016348&p1=16
+
+https://blog.csdn.net/u010443710/article/details/107014873
+
+http://www.tjtech.me/sdio-card-init.html
+
+https://blog.csdn.net/wzm_c1386666/article/details/120618310
+
+https://blog.csdn.net/u013686019/article/details/69214891
+
+https://so.csdn.net/so/search?q=sdio&t=blog&u=u013686019&urw=
+
+
 
 **sdio_init_func(host->card, i + 1);**
 
@@ -4455,7 +4486,7 @@ sdio_read_func_cis负责读卡并初始化func->vendor和func->device
 
 **mmc_add_card(host->card);**
 
-让前面指定的父设备、总线生效，即在/sys/devices/platform/dwmmc@fe2c0000/mmc_host/下创建对应card节点
+让前面指定的父设备、总线生效，即在/sys/devices/platform/fe2c0000/mmc_host/下创建对应card节点
 
 /rk3569_r/kernel/drivers/mmc/core/bus.c
 
@@ -4550,7 +4581,7 @@ sdio驱动和sdio设备在sdio总线上匹配的规则是：
 
 ## 11 模组适配
 
-
+### 1、android-hardware-wifi@1.0-service
 
 frameworks/opt/net/wifi/libwifi_hal/Android.mk
 
@@ -4560,8 +4591,7 @@ BOARD_WLAN_DEVICE           :=  MediaTek
 ifeq ($(BOARD_WLAN_DEVICE), MediaTek)
 103   # support MTK WIFI HAL
 104   LIB_WIFI_HAL := libwifi-hal-mt66xx
-
-
+......
 114 include $(CLEAR_VARS)
 115 LOCAL_MODULE := libwifi-hal
 116 LOCAL_PROPRIETARY_MODULE := true
@@ -4596,7 +4626,50 @@ android-hardware-wifi@1.x-service 使用 libwifi-hal.so
 
 
 
+wifi_hal/Android.mk
 
+```
+LOCAL_PATH := $(call my-dir)
+
+# Make the HAL library
+# ============================================================
+include $(CLEAR_VARS)
+
+LOCAL_REQUIRED_MODULES :=
+
+LOCAL_CFLAGS += -Wno-unused-parameter -Wno-int-to-pointer-cast
+LOCAL_CFLAGS += -Wno-maybe-uninitialized -Wno-parentheses
+LOCAL_CPPFLAGS += -Wno-conversion-null
+
+ifneq ($(TARGET_BUILD_VARIANT), user)
+LOCAL_CFLAGS += -DCONFIG_DEBUG_VER
+endif
+
+LOCAL_C_INCLUDES += \
+	external/libnl/include \
+	$(call include-path-for, libhardware_legacy)/hardware_legacy \
+	external/wpa_supplicant_8/src/drivers
+
+LOCAL_SRC_FILES := \
+	wifi_hal.cpp \
+	common.cpp \
+	cpp_bindings.cpp \
+	wifi_logger.cpp \
+	wifi_offload.cpp
+
+LOCAL_SHARED_LIBRARIES += libutils liblog
+LOCAL_MODULE := libwifi-hal-mt66xx
+LOCAL_PROPRIETARY_MODULE := true
+LOCAL_MODULE_OWNER := mtk
+
+include $(BUILD_STATIC_LIBRARY)
+```
+
+
+
+
+
+### 2、wpa_supplicant 
 
 
 
@@ -4616,7 +4689,7 @@ lib_driver_cmd_mt66xx是静态库
 
 wpa_supplicant 在构建时需要BOARD_WPA_SUPPLICANT_PRIVATE_LIB指定的静态库模块
 
-  
+ 
 
 
 
@@ -4632,7 +4705,7 @@ p2p-supplicant-overlay.conf
 
 
 
-
+### 3、固件及驱动配置文件
 
 /vendor/firmware/目录下
 
@@ -4644,151 +4717,25 @@ driver_config_file(eg:   TxPwrLimit_MT76x3.dat  wifi_mt7661.cfg  )
 
 
 
+### 4、wifi driver
 
+dts
 
-wifi driver
+sdio platform
 
+sdio device
 
-
-
-
-
-
-
-
-sdio_device参考上一节
+sdio drive
 
 
 
+### 5、framework
 
-
-## 12、安卓消息处理
-
-
-
-```
-Message.java
-
-Handler.java
-
-Looper.java
-
-HandlerThread.java
+WifiNative.java
 
 
 
 
-
-
-
-
-
-//创建线程处理函数之方式1
-
-class MyHandlerThread extends Thread {
-
-	private Looper mLooper  ;
-
-	@Override
-	public void run() {
-		super.run();
-		Looper.prepare();
-		synchronized (this) {
-			mLooper   =  Looper.myLooper();
-			notifyAll();
-		}
-		Looper.loop();
-	}
-
-	public Looper getLooper() {
-		if(!isAlive()) return null;
-		synchronized (this) {
-			while ( isAlive() && mLooper == null ) {
-				try { wait(); } catch (InterruptedException e) {}
-			}
-		}
-		return mLooper;
-	}
-}
-
-
-MyHandlerThread mHandlerThread= new  MyHandlerThread();
-mHandlerThread.start();
-
-
-
-//创建线程处理函数之方式2
-import android.os.HandlerThread；
-
-HandlerThread  mHandlerThread = new HandlerThread("name")
-
-mHandlerThread.start();
-
-
-
-
-
-//发消息之方式1
-
-Handler mHandler =new Handler(mHandlerThread .getLooper())
-
-mHandler.post(new Runnable() {
-	@Override
-    public void run() {
-		Log.d(TAG, "ssss");
-    }
-});
-
-
-
-
-
-//发消息之方式2
-
-Handler mHandler =new Handler(mHandlerThread .getLooper(), new Handler.Callback() {
-	@Override
-	public boolean handleMessage(Message msg) {
-		Log.d(TAG, "AAAA");
-	}
-});
-
-
-//Message msg = Handler.obtainMessage()
-//Message msg = Message.obtain()
-Message msg = new Message();
-
-
-mHandler.sendMessage(msg);
-
-
-
-
-消息处理线程mHandlerThread调用Looper的loop方法用于消息处理：
-public static void loop() {
-final Looper me = myLooper();
-final MessageQueue queue = me.mQueue;
-for (;;) {
-   Message msg = queue.next();
-   msg.target.dispatchMessage(msg);
-}
-msg.target其实就是在消息发送线程中创建的mHandler，相当于在消息处理是在调用mHandlerThread线程中调用mHandler的dispatchMessage方法来进行处理，Handler的dispatchMessage方法如下：
-97      public void dispatchMessage(@NonNull Message msg) {
-98          if (msg.callback != null) {
-99              handleCallback(msg);
-100          } else {
-101              if (mCallback != null) {
-102                  if (mCallback.handleMessage(msg)) {
-103                      return;
-104                  }
-105              }
-106              handleMessage(msg);
-107          }
-108      }
-以下情况三选一：
-1、调用Handler的handleCallback方法处理消息。
-2、调用Handler的内部类mCallback的handleMessage来处理消息，即发消息之方式2中new Handler时传入了一个callback匿名对象(重写了handleMessage方法)
-3、调用Handler的handleMessage方法来处理消息。即StateMachine的内部类SmHandler的做法。
-```
 
 
 
