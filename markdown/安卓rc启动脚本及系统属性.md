@@ -201,6 +201,12 @@ property_set/get 其实是对bionic C库中__system_property_set/get的封装
 
 
 * libc.so   bionic
+
+  #include <sys/system_properties.h>
+
+  PROP_VALUE_MAX 
+
+  PROP_NAME_MAX
  ```
 int __system_property_set(const char* key, const char* value)
 int __system_property_get(const char* key, char* value)

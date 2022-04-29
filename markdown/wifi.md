@@ -3661,12 +3661,34 @@ external/wpa_supplicant_8/wpa_supplicant/events.c
 ......
 2189  	if (selected) {
 ......
-2207  		if (wpa_supplicant_connect(wpa_s, selected, ssid) < 0) {
-2208  			wpa_dbg(wpa_s, MSG_DEBUG, "Connect failed");
-2209  			return -1;
-2210  		}
-......
-2219  	} else {
+1925  		int skip;
+1926  		skip = !wpa_supplicant_need_to_roam(wpa_s, selected, ssid);
+1927  		if (skip) {
+1928  			if (new_scan)
+1929  				wpa_supplicant_rsn_preauth_scan_results(wpa_s);
+1930  			return 0;
+1931  		}
+1932  
+1933  		if (ssid != wpa_s->current_ssid &&
+1934  		    wpa_s->wpa_state >= WPA_AUTHENTICATING) {
+1935  			wpa_s->own_disconnect_req = 1;
+1936  			wpa_supplicant_deauthenticate(
+1937  				wpa_s, WLAN_REASON_DEAUTH_LEAVING);
+1938  		}
+1939  
+1940  		if (wpa_supplicant_connect(wpa_s, selected, ssid) < 0) {
+1941  			wpa_dbg(wpa_s, MSG_DEBUG, "Connect failed");
+1942  			return -1;
+1943  		}
+1944  		if (new_scan)
+1945  			wpa_supplicant_rsn_preauth_scan_results(wpa_s);
+1946  		/*
+1947  		 * Do not allow other virtual radios to trigger operations based
+1948  		 * on these scan results since we do not want them to start
+1949  		 * other associations at the same time.
+1950  		 */
+1951  		return 1;
+1952  	} else {
 ......
 2301  	}
 2302  	return 0;
@@ -3712,40 +3734,151 @@ external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 2302  }
 ```
 
-wpa_supplicant_associate函数分为两种处理方式，一种是sae auth  另一种是external auth
+wpa_supplicant_associate函数分为两种处理方式，一种是sme auth  另一种是external auth
 
-######  sae auth
+######  SME auth
 
 https://blog.csdn.net/krokodil98/article/details/118612374
 
-WPA3-Personal采用了新的加密方式，SAE算法。
-
-![img](wifi.assets/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2tyb2tvZGlsOTg=,size_16,color_FFFFFF,t_70#pic_center.jpeg)
+![image-20220428171839656](wifi.assets/image-20220428171839656.png)
 
 
 
+![image-20220428172028922](wifi.assets/image-20220428172028922.png)
 
+
+
+
+
+
+
+```
+280  static void sme_send_authentication(struct wpa_supplicant *wpa_s,
+281  				    struct wpa_bss *bss, struct wpa_ssid *ssid,
+282  				    int start)
+283  {
+......
+741  	wpa_supplicant_initiate_eapol(wpa_s);
+......
+824  	wpa_supplicant_cancel_sched_scan(wpa_s);
+825  	wpa_supplicant_cancel_scan(wpa_s);
+826  
+827  	wpa_msg(wpa_s, MSG_INFO, "SME: Trying to authenticate with " MACSTR
+828  		" (SSID='%s' freq=%d MHz)", MAC2STR(params.bssid),
+829  		wpa_ssid_txt(params.ssid, params.ssid_len), params.freq);
+830  
+831  	eapol_sm_notify_portValid(wpa_s->eapol, false);
+832  	wpa_clear_keys(wpa_s, bss->bssid);
+833  	wpa_supplicant_set_state(wpa_s, WPA_AUTHENTICATING);
+834  	if (old_ssid != wpa_s->current_ssid)
+835  		wpas_notify_network_changed(wpa_s);
+......
+867  	if (skip_auth) {
+868  		wpa_msg(wpa_s, MSG_DEBUG,
+869  			"SME: Skip authentication step on reassoc-to-same-BSS");
+870  		wpabuf_free(resp);
+871  		sme_associate(wpa_s, ssid->mode, bss->bssid, WLAN_AUTH_OPEN);
+872  		return;
+873  	}
+874  
+875  
+876  	wpa_s->sme.auth_alg = params.auth_alg;
+877  	if (wpa_drv_authenticate(wpa_s, &params) < 0) {
+878  		wpa_msg(wpa_s, MSG_INFO, "SME: Authentication request to the "
+879  			"driver failed");
+880  		wpas_connection_failed(wpa_s, bss->bssid);
+881  		wpa_supplicant_mark_disassoc(wpa_s);
+882  		wpabuf_free(resp);
+883  		wpas_connect_work_done(wpa_s);
+884  		return;
+885  	}
+886  
+887  	eloop_register_timeout(SME_AUTH_TIMEOUT, 0, sme_auth_timer, wpa_s,
+888  			       NULL);
+889  
+890  	/*
+891  	 * Association will be started based on the authentication event from
+892  	 * the driver.
+893  	 */
+894  
+895  	wpabuf_free(resp);
+896  }
+```
+
+
+
+![image-20220428181322907](wifi.assets/image-20220428181322907.png)
+
+
+
+![image-20220428181506132](wifi.assets/image-20220428181506132.png)
+
+
+
+![image-20220428181539144](wifi.assets/image-20220428181539144.png)
+
+
+
+external/wpa_supplicant_8/src/drivers/driver_nl80211.c
+
+```c
+3600  static int wpa_driver_nl80211_authenticate(
+3601  	struct i802_bss *bss, struct wpa_driver_auth_params *params)
+3602  {
+3603  	struct wpa_driver_nl80211_data *drv = bss->drv;
+3604  	int ret = -1, i;
+3605  	struct nl_msg *msg;
+......//设置各种参数
+3631  retry:
+3632  	wpa_printf(MSG_DEBUG, "nl80211: Authenticate (ifindex=%d)",
+3633  		   drv->ifindex);
+3634  
+3635  	msg = nl80211_drv_msg(drv, 0, NL80211_CMD_AUTHENTICATE);//把NL80211_CMD_AUTHENTICATE放入msg
+......//设置各种参数
+3700  	ret = send_and_recv_msgs(drv, msg, NULL, NULL);//发送msg给驱动
+3701  	msg = NULL;
+3702  	if (ret) {
+3703  		wpa_dbg(drv->ctx, MSG_DEBUG,
+3704  			"nl80211: MLME command failed (auth): count=%d ret=%d (%s)",
+3705  			count, ret, strerror(-ret));
+3706  		count++;
+......      //失败后进行一些判断，如果满足条件则goto retry
+3765  	} else {
+3766  		wpa_printf(MSG_DEBUG,
+3767  			   "nl80211: Authentication request send successfully");
+3768  	}
+3769  
+3770  fail:
+3771  	nlmsg_free(msg);
+3772  	return ret;
+3773  }
+```
+
+
+
+![image-20220429175208791](wifi.assets/image-20220429175208791.png)
+
+
+
+![image-20220429175241984](wifi.assets/image-20220429175241984.png)
+
+
+
+![image-20220429175307504](wifi.assets/image-20220429175307504.png)
+
+
+
+![image-20220429175755746](wifi.assets/image-20220429175755746.png)
+
+
+
+http://10.234.22.197:6015/source/xref/w600/src/mt8185_sdk/external/wpa_supplicant_8/src/drivers/driver_nl80211.c#send_and_recv
 
 
 
 ######  external auth
 
 https://blog.csdn.net/krokodil98/article/details/118761897
-
-WPA2的wifi连接流程：auth只有两帧
-
-STA ------------>   Authentication Request  --------> AP //认证Auth类型，Open System , Shared Key等
-STA <------------   Authentication Response <------ AP
-STA ------------->  Association Request  ------------> AP  //请求与AP建立关联，从而可以进行数据交互
-STA <-------------  Association Response <----------- AP
-STA <-------------  EAPOL-KEY <----------- AP
-STA ------------>  EAPOL-KEY  --------> AP 
-STA <-------------  EAPOL-KEY <----------- AP
-STA ------------>  EAPOL-KEY  --------> AP 
-
-
-
-
 
 wpa_supplicant_associate函数分为两种处理方式，一种是external auth
 
@@ -4573,6 +4706,68 @@ sdio驱动和sdio设备在sdio总线上匹配的规则是：
 
 
 
+kernel/include/linux/platform_device.h
+
+```
+180  struct platform_driver {
+181  	int (*probe)(struct platform_device *);
+182  	int (*remove)(struct platform_device *);
+183  	void (*shutdown)(struct platform_device *);
+184  	int (*suspend)(struct platform_device *, pm_message_t state);
+185  	int (*resume)(struct platform_device *);
+186  	struct device_driver driver;
+187  	const struct platform_device_id *id_table;
+188  	bool prevent_deferred_probe;
+189  };
+```
+
+kernel/include/linux/device.h
+
+```
+298  struct device_driver {
+299  	const char		*name;
+300  	struct bus_type		*bus;
+301  
+302  	struct module		*owner;
+303  	const char		*mod_name;	/* used for built-in modules */
+304  
+305  	bool suppress_bind_attrs;	/* disables bind/unbind via sysfs */
+306  	enum probe_type probe_type;
+307  
+308  	const struct of_device_id	*of_match_table;
+309  	const struct acpi_device_id	*acpi_match_table;
+310  
+311  	int (*probe) (struct device *dev);
+312  	void (*sync_state)(struct device *dev);
+313  	int (*remove) (struct device *dev);
+314  	void (*shutdown) (struct device *dev);
+315  	int (*suspend) (struct device *dev, pm_message_t state);
+316  	int (*resume) (struct device *dev);
+317  	const struct attribute_group **groups;
+318  
+319  	const struct dev_pm_ops *pm;
+320  	void (*coredump) (struct device *dev);
+321  
+322  	struct driver_private *p;
+323  
+324  	ANDROID_KABI_RESERVE(1);
+325  	ANDROID_KABI_RESERVE(2);
+326  	ANDROID_KABI_RESERVE(3);
+327  	ANDROID_KABI_RESERVE(4);
+328  };
+```
+
+kernel/include/linux/mod_devicetable.h
+
+```
+235  struct of_device_id {
+236  	char	name[32];
+237  	char	type[32];
+238  	char	compatible[128];
+239  	const void *data;
+240  };
+```
+
 
 
 ### 10.5 sdio驱动
@@ -4715,6 +4910,64 @@ driver_config_file(eg:   TxPwrLimit_MT76x3.dat  wifi_mt7661.cfg  )
 
 
 
+TxPwrLimit_MT76x3.dat
+
+```
+# The unit of each TxPower value is 0.5dBm.
+# 'x' means use efuse default value instead of from this table
+# Channels in the table are treated as center channel.
+
+<Ver:01>
+
+[00]                    //这个是国家码，默认00
+<cck,  c1, c2, c5, c11> //横行c1, c2, c5, c11分别对应1、2、5.5、11这四挡速率,竖行对应不同的信道
+ch001, 43, 43, 43,  43  //ch001是信道0，43是该信道和速率下对应的Txpwr,单位是0.5dbm
+......
+</cck>                  //cck是802.11b
+
+<ofdm, o6, o9, o12, o18, o24, o36, o48, o54> //横行分别对应6、9、12、18、24、36、48、54这几档速率,竖行对应不同的信道
+ch001, 41, 41,  41,  41,  39,  39,  38,  37
+......
+</ofdm>                                      //ofdm是802.11a/g，2.4G部分是11g，5G部分是11a
+
+<ht20, m0, m1, m2, m3, m4, m5, m6, m7>    //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
+ch001, 39, 39, 39, 38, 38, 37, 37, 36
+......
+</ht20>                                    //ht20是802.11n HT20 
+
+<ht40, m0, m1, m2, m3, m4, m5, m6, m7, m32>  //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
+ch001, 39, 39, 39, 38, 38, 36, 36, 35,  39
+......
+</ht40>                                   //ht40是802.11n HT40 
+
+<vht20, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9>  //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
+ch001,  39, 39, 39, 38, 38, 37, 37, 36, 33, 32
+......
+</vht20>                                   //vht20是802.11n HT20 
+
+<vht40, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9>  //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
+ch001,  39, 39, 39, 38, 38, 36, 36, 35, 32, 31
+......
+</vht40>                                      //vht40是802.11n vht40
+
+<vht80, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9>  //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
+ch036,  37, 37, 37, 35, 35, 34, 34, 32, 30, 30
+......
+</vht80>                                    //vht80是802.11n vht80
+```
+
+
+
+文件默认只有设置[00]国家码，如果在平台上有放置这个.dat文件，驱动会去读这个文件中的值。正常Efuse settings >= TxPwrLimit table， 即efuse中设定的值对TxPwrLimit表总是有较大的值或相等的值。如果想微调某个模式，某个信道的TX POWER值，可以修改TxPwrLimit_MT76x3.dat。
+
+修改注意事项：
+
+1） 比如要定义CN或US的，可以整个把目前.dat文件中内容copy再粘贴，然后将[00]改为[CN]或[US]，即增加一个[CN]或[US]的定义
+
+2） 然后修改你对应国家码里某个模式某个信道下的设定值。Unit: 0.5 dBm 。
+
+
+
 
 
 ### 4、wifi driver
@@ -4745,3 +4998,59 @@ WifiNative.java
 
 
 
+## 12. wifi相关名词及概念
+
+https://zhuanlan.zhihu.com/p/20731045
+
+https://www.zhihu.com/zvideo/1499133891747737600
+
+
+
+* Hotspot 2.0  r2  OSEN  HS20    
+
+Hotspot2.0是WFA（Wi-Fi Alliance）的一项技术规范，该规范允许无线终端在不需要额外身份标识的情况下，利用802.11u完成WLAN网络中的自动身份识别和无缝切换，使得无线终端在Wi-Fi漫游时，达到类似蜂窝网络用户体验的效果。简单来说用于wifi与2G/3G/4G网络直接进行漫游。它对应eap外层也即第一阶段认证的一种方式：
+
+![image-20220428204036288](wifi.assets/image-20220428204036288.png)
+
+
+
+* WAIP
+
+ 国内搞的一套wifi认证方式
+
+
+
+
+
+* Wi-Fi Simple Configuration（以后简写为WSC）：该项技术用于简化SOHO环境中无线网络的配置和使用。举一个简单的例子，配置无线网络环境时，网管需要首先为AP设置SSID、安全属性（如身份认证方法、加密方法等）。然后他还得把SSID、密码告诉给该无线网络的使用者。可是这些安全设置信息对普通大众而言还是有些复杂。而有了WSC之后，用户只需输入PIN码（Personal Identification Number，一串数字），或者摁一下专门的按钮（WSC中，该按钮被称为Push Button）甚至用户只要拿着支持NFC的手机到目标AP（它必须也支持NFC）旁刷一下，这些安全设置就能被自动配置好。有了这些信息，手机就能连接上目标无线网络了。显然，相比让用户记住SSID、密码等信息，WSC要简单多了。wpas_wps_in_use判断是否需要在Probe Request中添加WSC IE。WPAS的判断标准比较简单，就是查询所有的wpa_ssid对象，判断它们的key_mgmt是否设置了**WPA_KEY_MGMT_WPS**。如果有，表明搜索的时候需要支持WSC IE。我们在介绍“WPS_PIN命令处理”时曾说过，WPAS将添加一个wpa_ssid对象，并设置key_mgmt为WPA_KEY_MGMT_WPS。https://www.kancloud.cn/alex_wsc/android-wifi-nfc-gps/414111
+
+
+
+* Wi-Fi Peer-to-Peer（以后简写为P2P）：P2P的商品名（brand name）为Wi-Fi Direct。它支持多个Wi-Fi设备在没有AP的情况下相互连接。笔者个人认为P2P是Wi-Fi中最具应用前景的一项技术。例如，在家庭中，用户可直接把手机上的内容通过P2P技术传输到电视机上和家人分享。
+
+
+
+* 帧格式
+
+
+* 管理帧
+
+![img](wifi.assets/aaaaa.png)
+
+
+
+**管理帧的frame body由fixed field(固定字段)和Information Element(IE,信息元素)组成。**首先是固定长度字段，然后才是可变长度的信息元素。各种固定字段和各种信息元素的排列方式有一定顺序不能乱序，但管理帧可以选择携带或不携带某些类型的固定字段和信息元素。不同的管理帧只是选择携带的某些类型的固定字段和信息元素不同罢了。详细参考《802.11无线网络权威指南》
+
+
+
+* 数据帧
+
+  ![ccccc](wifi.assets/ccccc.jpg)
+
+Address4字段(SA)通常情况下没有，即长度为0，只有在WDS(无线网络桥接)时才使用。
+
+数据帧的frame body携带下图中802.11 MAC payload中除FCS之外的其他内容：
+
+![image-20220428212105079](wifi.assets/image-20220428212105079.png)
+
+根据Type字段的指示，IP Packet字段中可以存放对应的报文，例如IP报文，EAPOL报文等。
