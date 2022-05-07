@@ -939,7 +939,7 @@ interface ISupplicantStaIface extends ISupplicantIface
 
 ## 3 wificond
 
-
+参考后续章节  打开wifi和扫描AP的描述
 
 
 
@@ -2086,7 +2086,41 @@ const auto& ret_pair = (obj->*work)(std::forward<Args>(args)...); 相当于调�
 
 ##### 5.2.3.3 Supplicant::addInterfaceInternal
 
+Supplicant::addInterfaceInternal判断传入的iface_info.name(virtual interface name ,也即网卡名)不为空后调用getInterfaceInternal从map中获取SupplicantIface接口的对象，如果没有则根据iface_info.type调用ensureConfigFileExists函数，然后使用相关信息填充struct wpa_interface类型的iface_params对象，然后将iface_params等信息作为参数调用wpa_supplicant_add_iface函数来创建一个SupplicantIface接口的对象并放入map中，最后再次调用getInterfaceInternal从map中取出该SupplicantIface接口的对象。
 
+
+
+**注意，调用该接口时可能驱动中该name的virtual interface 已经存在了，调用该接口更多的是为了在wpa_supplicant进程中创建并初始化一个wpa_supplicant类型的对象用来描述virtual interface，当然最终都会发送数据给驱动去创建virtual interface ，只是驱动发现如果已经有该name的virtual interface时没有再去创建直接返回成功**。
+
+  
+
+![image-20220506165530399](wifi.assets/image-20220506165530399.png)
+
+来看下ensureConfigFileExists注释和一些conf文件所在绝对路径的宏定义：
+
+![image-20220506170806424](wifi.assets/image-20220506170806424.png)
+
+![image-20220506170840436](wifi.assets/image-20220506170840436.png)
+
+因此在mtk平台struct wpa_interface类型的iface_params对象被填充成这样：
+
+iface_params.name = ifname                                                                   //virtual interface 名，即网卡名,一般sta模式传入的是wlan0
+
+iface_params.confname = "/data/vendor/wifi/wpa/wpa_supplicant.conf"  //该文件拷贝自/vendor/etc/wifi/wpa_supplicant.conf
+
+iface_params.confanother = "/vendor/etc/wifi/wpa_supplicant_overlay.conf" //overlay,用以覆盖wpa_supplicant.conf中的配置
+
+
+
+跟踪wpa_supplicant的main函数及其初始化可以知道，Supplicant是一个往hwServiceManager注册的hidl对象，new Supplicant对象时传入了传入的struct wpa_global *地址就是main函数中局部变量struct wpa_global *global指向的堆地址。在Supplicant对象构造时其内部变量wpa_global\_也指向了堆中的同样一个位置。
+
+![image-20220506172215234](wifi.assets/image-20220506172215234.png)
+
+
+
+接下来看wpa_supplicant_add_iface如何使用wpa_global\_和iface_params 
+
+![image-20220507094045902](wifi.assets/image-20220507094045902.png)
 
 
 
@@ -2119,6 +2153,12 @@ StaNetwork::setKeyMgmt
 StaNetwork::setKeyMgmt_1_2
 
 StaNetwork::setKeyMgmt_1_3
+
+
+
+
+
+### 5.3  wpa_supplicant中重要数据结构及关系
 
 
 
@@ -2428,7 +2468,7 @@ DeferStopHandler最终调用continueToStopWifi()来关闭wifi。
 
 #### 6.1.4 setupInterfaceForClientInScanMode()
 
-根据前面章节分析，ClientModeStateMachine层次状态机处理Message(CMD_START)的过程中会调用WifiNative.setupInterfaceForClientInScanMode（）方法
+根据前面章节分析，ClientModeStateMachine层次状态机处理Message(CMD_START)的过程中会调用WifiNative.setupInterfaceForClientInScanMode（）方法，该方法做如下事情：装载驱动，启动wpa_supplicant ，添加wpa_supplicant interface，获取驱动/模组信息，初始化成scan模式，wlan0 up
 
 ![image-20220408181731764](wifi.assets/image-20220408181731764.png)
 
@@ -2436,66 +2476,269 @@ DeferStopHandler最终调用continueToStopWifi()来关闭wifi。
 
 ##### 1、startHal()
 
-装载驱动，启动wpa_supplicant ，添加wpa_supplicant interface，获取驱动/模组信息，初始化成scan模式，wlan0 up
+startHal主要负责驱动装载，初始化wifi_hal的vendor func table
+
+![image-20220505142521448](wifi.assets/image-20220505142521448.png)
 
 
 
+![image-20220505142553409](wifi.assets/image-20220505142553409.png)
 
 
- wifi驱动装载
 
-```
-WIFI_MODULE
-
-WIFI_DRIVER
+![image-20220505142657258](wifi.assets/image-20220505142657258.png)
 
 
-WPA_SUPPLICANT_VERSION			:= VER_0_8_X
-BOARD_WPA_SUPPLICANT_DRIVER	:= NL80211
-BOARD_HOSTAPD_DRIVER				:= NL80211
 
-BOARD_WPA_SUPPLICANT_PRIVATE_LIB
-BOARD_HOSTAPD_PRIVATE_LIB
-lib_driver_cmd_multi/lib_driver_cmd_qcom/lib_driver_cmd_mtk/lib_driver_cmd_bcmdhd_ampak/lib_driver_cmd_bcmdhd_usi/lib_driver_cmd_nl80211/lib_driver_cmd_rtl
+![image-20220505143057750](wifi.assets/image-20220505143057750.png)
 
+initIWifiIfNecessary中首先调用getWifiServiceMockable通过hwServiceManager获得Wifi服务的代理对象，然后往Wifi服务中注册hidl回调对象，最后调用Wifi::stopWifi()，回调对象和stopWifi方法暂时不去分析：
 
-WIFI_DRIVER_MODULE_PATH
-WIFI_DRIVER_MODULE_NAME
-
-hardware/interfaces/wifi/1.x/default/Android.mk
-android.hardware.wifi@1.0-service
+![image-20220505143125792](wifi.assets/image-20220505143125792.png)
 
 
-libwifi-hal.so
-frameworks/opt/net/wifi/libwifi_hal/wifi_hal_common.cpp
-wifi_load_driver
+
+![image-20220505143154533](wifi.assets/image-20220505143154533.png)
+
+调用完initIWifiIfNecessary后回到startWifi方法，该方法中通过Wifi代理对象调用到Wifi服务端的start方法：
+
+![image-20220505143249695](wifi.assets/image-20220505143249695.png)
 
 
-libwifi-hal-common-ext.so
-wifi_load_driver_ext
-```
+
+注意startInternal方法中除了调用initializeModeControllerAndLegacyHal方法外还new了一个WifiChip对象，后续createStaInterface中获取驱动相关信息时会用到。
+
+![image-20220505143609611](wifi.assets/image-20220505143609611.png)
+
+
+
+initializeModeControllerAndLegacyHal方法在hardware/interfaces/wifi/1.4/default/wifi.cpp中实现：
+
+![image-20220505143652427](wifi.assets/image-20220505143652427.png)
+
+mode_controller\_和legacy_hal\_在Wifi对象构造时传入并赋值：
+
+![image-20220505143827130](wifi.assets/image-20220505143827130.png)
+
+来看下Wifi对象构造时传入了什么：
+
+![image-20220505144018667](wifi.assets/image-20220505144018667.png)
+
+
+
+因此initializeModeControllerAndLegacyHal方法中调用mode_controller_->initialize()最终调用到了：hardware/interfaces/wifi/1.4/default/wifi_mode_controller.cpp
+
+![image-20220505144539301](wifi.assets/image-20220505144539301.png)
+
+
+
+![image-20220505144649367](wifi.assets/image-20220505144649367.png)
+
+
+
+wifi_load_driver是一个接口函数，不同厂家可能会修改加入自己的实现方案，例如rk平台和amlogic平台都进行了一些修改来满足不同wifi模组适配、驱动装载时设置参数等各种需求。以下是AOSP的实现，mtk并未进行修改。
+
+![image-20220505144947267](wifi.assets/image-20220505144947267.png)
+
+
+
+![image-20220505144123355](wifi.assets/image-20220505144123355.png)
+
+
+
+![image-20220505144233506](wifi.assets/image-20220505144233506.png)
+
+
+
+![image-20220505144316910](wifi.assets/image-20220505144316910.png)
 
 
 
 ##### 2、startSupplicant()
 
+startSupplicant最终通过hidl接口向hwServiceManager获取supplicant服务的代理端，注意如果wpa_supplicant是lazy_hal，开机默认并未启动，当这里获取时hwServiceManager会读取xml文件发现supplicant确实是个hal服务，然后向init进程发送ctl.start系统属性设置请求来启动wpa_supplicant，init进程在开机时已经读取了wpa_supplicant的rc启动文件，在收到hwServiceManager设置ctl.start系统属性设置请求后按照rc文件中的描述去启动wpa_supplicant进程，wpa_supplicant进程启动后最终会向hwServiceManager进程注册supplicant服务，至此hwServiceManager再将supplicant服务的代理端返回给获取supplicant服务代理端的进程。
+
+![image-20220505102057503](wifi.assets/image-20220505102057503.png)
+
+
+
+![image-20220505102806859](wifi.assets/image-20220505102806859.png)
+
+
+
+![image-20220505102833244](wifi.assets/image-20220505102833244.png)
+
+
+
+![image-20220505102903542](wifi.assets/image-20220505102903542.png)
+
+
+
+![image-20220505102949446](wifi.assets/image-20220505102949446.png)
+
+
+
+![image-20220505103031444](wifi.assets/image-20220505103031444.png)
+
 
 
 ##### 3、mIfaceMgr.allocateIface
+
+传入的参数是Iface.IFACE_TYPE_STA_FOR_SCAN，allocateIface方法使用传入的参数new一个WifiNative.Iface类型的对象
+
+![image-20220505161906141](wifi.assets/image-20220505161906141.png)
+
+![image-20220505161941832](wifi.assets/image-20220505161941832.png)
 
 
 
 ##### 4、createStaIface(iface)
 
+使用wifi模组厂商提供的wifi_hal来跟驱动交互，读取驱动支持的virtual interface组合，判断是否能够创建该virtual interface, 结合需求找到需要创建的best virtual interface combo，然后可能在驱动中创建该virtual interface（注，目前只发现高通wifi_hal支持该功能，其他平台都没有在这里创建，因为驱动装载时已经默认创建了)。**最后返回该virtual interface 的名字，即网卡名。**
 
 
-##### 5、WifiNl80211Manager .setupInterfaceForClientMode
+
+![image-20220505114108764](wifi.assets/image-20220505114108764.png)
 
 
+
+![image-20220505114136031](wifi.assets/image-20220505114136031.png)
+
+
+
+![image-20220505114206247](wifi.assets/image-20220505114206247.png)
+
+注意，这里wifi chip info最终还是通过hidl接口调用到startHal时android.hardware.wifi@1.x-service中new的那个WifiChip对象。前面已经提及在Wifi::startInternal中new了一个WifiChip对象。
+
+![image-20220505114232463](wifi.assets/image-20220505114232463.png)
+
+
+
+![image-20220505114317051](wifi.assets/image-20220505114317051.png)
+
+
+
+![image-20220505114638922](wifi.assets/image-20220505114638922.png)
+
+
+
+通过HIDL调用到android.hardware.wifi@1.x-service进程中的实现端，注意JAVA端传入的lambda表达式，它有WifiStatus status, IWifiStaIface iface这两个参数。
+
+
+
+![image-20220505114749492](wifi.assets/image-20220505114749492.png)
+
+在validateAndCall的line 80调用WifiChip::createStaIfaceInternal，在validateAndCall的line 83使用调用WifiChip::createStaIfaceInternal得到的结果来调用hidl_cb，调用hidl_cb就相当于调用JAVA端的那个lambda表达式(通过hidl实现)，这样调用WifiChip::createStaIfaceInternal得到的结果(return的std::pair中的status和iface)就通过JAVA端lambda表达式的参数传入了hild client端，在lambda表达式中将 传入的status赋给了statusResp.value，将iface赋给了ifaceResp.value。
+
+![image-20220506153308607](wifi.assets/image-20220506153308607.png)
+
+
+
+![image-20220505191007108](wifi.assets/image-20220505191007108.png)
+
+
+
+WifiNative.createStaIface的hidl服务实现端是WifiChip::createStaIfaceInternal，服务实现端做如下三件事：
+
+* WifiChip::allocateStaIfaceName，用来获得一个virtual interface name，见下文分析。
+
+* legacy_hal_.lock()->createVirtualInterface，可能会调用wifi hal创建该virtual interface, 一定会把所有的virtual interface相关数据与virtual interface name 对应放到一个map中。见下文分析。
+
+* 创建WifiStaIface类型的iface对象，构造参数传入了先前获得的virtual interface name等信息。
+
+* 把iface push_back到sta_iface\_这个vector中。
+
+* 调用先前使用hidl注册到WifiChip中的callback对象。
+
+* getFirstActiveWlanIfaceName()从该vector中返回第0个元素的Name，setActiveWlanIfaceNameProperty将该name写入wifi.active.interface系统属性。
+
+* 将status和WifiStaIface类型的iface对象放入std::pair中返回。
+
+  
+
+WifiChip::createStaIfaceInternal中调用到了WifiChip::allocateStaIfaceName
+
+![image-20220505191805641](wifi.assets/image-20220505191805641.png)
+
+
+
+![image-20220505191227976](wifi.assets/image-20220505191227976.png)
+
+
+
+![image-20220505191311420](wifi.assets/image-20220505191311420.png)
+
+ 在mtk平台，wifi.interface系统属性在system.prop中定义：
+
+![image-20220506160335701](wifi.assets/image-20220506160335701.png)
+
+
+
+WifiChip::createStaIfaceInternal中调用到了legacy_hal_.lock()->createVirtualInterface时，实际上调用到了WifiLegacyHal::createVirtualInterface
+
+![image-20220505114901586](wifi.assets/image-20220505114901586.png)
+
+
+
+进行扫描前需要有virtual interface。
+
+目前只发现高通wifi模组的wifi_hal提供了WifiLegacyHal::wifi_virtual_interface_create函数，其他wifi模组的wifi_hal并未提供该函数。
+
+注意wifi驱动装载时可能已经创建了默认的sta virtual interface，所以不需要实现建该virtual interface的方法。
+
+
+
+mtk wifi模组的wifi_hal 未实现wifi_virtual_interface_create，因此调用默认函数返回WIFI_ERROR_NOT_SUPPORTED,看WifiLegacyHal::handleVirtualInterfaceCreateOrDeleteStatus如何处理返回结果：
+
+![image-20220505192620572](wifi.assets/image-20220505192620572.png)
+
+根据man手册，if_nametoindex可以根据网卡名返回网卡index顺序，如果没找到该网卡名则返回零，这样用来判断先前WifiChip::allocateStaIfaceName得到的网卡名(virtual interface)是否有效。如果有效则调用WifiLegacyHal::retrieveIfaceHandles
+
+![image-20220506144758434](wifi.assets/image-20220506144758434.png)
+
+WifiLegacyHal::retrieveIfaceHandles调用mtk提供的wifi_hal中的wifi_get_ifaces从global_handle\_中获得iface_handles数组，然后遍历该数组创建iface_name与iface_handles[i]的map映射iface_name_to_handle\_，即一个iface_name对应一个iface_handles[i]。然后返回WIFI_SUCCESS，最后一路返回到WifiChip::createStaIfaceInternal方法中。
+
+
+
+**wifi模组厂家的wifi_hal中即使没提供WifiLegacyHal::wifi_virtual_interface_create函数，在WifiChip::createStaIfaceInternal中调用legacy_hal_.lock()->createVirtualInterface时也能得到WIFI_SUCCESS。**
+
+
+
+
+
+##### 5、mWifiCondManager.setupInterfaceForClientMode
+
+setupInterfaceForClientMode跟wificond进程和后续扫描的过程密切相关，扫描过程中用到的一个关键对象即IWifiScannerImpl代理对象就是在这里放入map中的，后续扫描过程从map中取出。
 
 ![image-20220412212230035](wifi.assets/image-20220412212230035.png)
 
+调用链参考：
 
+![image-20220505160211707](wifi.assets/image-20220505160211707.png)
+
+
+
+
+
+##### 6、mSupplicantStaIfaceHal.setupIface(iface.name)
+
+传入的virtual interface name 来自前面createStaIface的返回值，该方法主要是让framework和wpa_supplicant创建相关数据结构来描述驱动中已经存在的这个virtual interface。
+
+ ![image-20220505163119517](wifi.assets/image-20220505163119517.png)
+
+
+
+![image-20220505163214215](wifi.assets/image-20220505163214215.png)
+
+
+
+![image-20220505163429155](wifi.assets/image-20220505163429155.png)
+
+
+
+![image-20220505163538129](wifi.assets/image-20220505163538129.png)
+
+后续参考第5章wpa_supplicant的分析。
 
 
 
@@ -2503,9 +2746,7 @@ wifi_load_driver_ext
 
 根据前面章节分析，ClientModeStateMachine层次状态机处理Message(CMD_SWITCH_TO_CONNECT_MODE)的过程中会调用WifiNative.switchClientInterfaceToConnectivityMode(@NonNull String ifaceName)方法
 
-mtk把aosp中启动wpa_supplicant和创建wpa_supplicant interface的步骤被移动到了setupInterfaceForClientInScanMode
-
-
+***mtk把aosp中启动wpa_supplicant和创建wpa_supplicant vitrual interface的步骤被移动到了setupInterfaceForClientInScanMode中，即上一节中的 startSupplicant 和setupIface本来是在这里的switchClientInterfaceToConnectivityMode中调用的***
 
 
 
@@ -3710,9 +3951,15 @@ external/wpa_supplicant_8/wpa_supplicant/events.c
 1721  }
 ```
 
+接下来的流程分为SME auth和exteral auth两种，根据virtual interface创建时从驱动获取的flag是否有WPA_DRIVER_FLAGS_SME标志来决定，即是否支持SME，SME的详细的解释可以看这篇：https://blog.csdn.net/qq_33307581/article/details/110151985
 
 
-##### wpa_supplicant_associate
+
+#####  SME auth 流程
+
+可参考https://blog.csdn.net/krokodil98/article/details/118612374
+
+###### 802.11 auth
 
 external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 
@@ -3727,18 +3974,10 @@ external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 2269  		return;
 2270  	}
 ......
-2298  	if (radio_add_work(wpa_s, bss ? bss->freq : 0, "connect", 1,
-2299  			   wpas_start_assoc_cb, cwork) < 0) {
-2300  		os_free(cwork);
-2301  	}
 2302  }
 ```
 
-wpa_supplicant_associate函数分为两种处理方式，一种是sme auth  另一种是external auth
 
-######  SME auth
-
-https://blog.csdn.net/krokodil98/article/details/118612374
 
 ![image-20220428171839656](wifi.assets/image-20220428171839656.png)
 
@@ -3872,15 +4111,41 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211.c
 
 
 
-http://10.234.22.197:6015/source/xref/w600/src/mt8185_sdk/external/wpa_supplicant_8/src/drivers/driver_nl80211.c#send_and_recv
 
 
 
-######  external auth
 
-https://blog.csdn.net/krokodil98/article/details/118761897
 
-wpa_supplicant_associate函数分为两种处理方式，一种是external auth
+
+
+
+#####  external auth 流程
+
+可参考  https://blog.csdn.net/krokodil98/article/details/118761897
+
+
+
+###### 802.11 auth and associate
+
+```
+2118  void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
+2119  			      struct wpa_bss *bss, struct wpa_ssid *ssid)
+2120  {
+......
+2298  	if (radio_add_work(wpa_s, bss ? bss->freq : 0, "connect", 1,
+2299  			   wpas_start_assoc_cb, cwork) < 0) {
+2300  		os_free(cwork);
+2301  	}
+2302  }
+```
+
+
+
+
+
+
+
+external auth是wpa_supplicant_associate函数的另一种处理方式
 
 external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 
@@ -3925,7 +4190,7 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211.c
 
 
 
-
+##### 
 
 驱动回复数据后调用回调函数do_process_drv_event函数来处理NL80211_CMD_CONNECT事件：
 

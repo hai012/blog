@@ -414,7 +414,7 @@ recvmsg(fd, &msg, 0); //recvmsg时iov和peer_addr将被填充
 
 ### 2. libnl
 
-推荐netlink 套接字通信都使用libnl系列的库来进行而不是直接使用socket API操作netlink套接字，libnl把使用socket API操作netlink套接字的操作进行了一层封装。libnl使用方法参考官网文档详细介绍。
+推荐netlink套接字通信都使用libnl系列的库来进行而不是直接使用socket API操作netlink套接字，libnl把使用socket API操作netlink套接字的操作进行了一层封装。libnl使用方法参考官网文档详细介绍。
 
 对于内核中常用的netlink protocol, 例如route,genl,nf，可以使用libnl-xxx，它们是对libnl更进一步的封装。
 
@@ -425,3 +425,273 @@ recvmsg(fd, &msg, 0); //recvmsg时iov和peer_addr将被填充
 
 
 ![img](netlink_libnl.assets/layer_diagram.png)
+
+
+
+struct nl_sock  用来描述某个netlink套接字及其相关信息，例如fd、nl_cb、  loacl/peer netlink套接字的地址(family port)、flag等
+
+struct nl_cb   回调信息，用于描述从netlink接收到数据后的处理。
+
+
+
+经典操作：
+
+```
+#include <netlink/netlink.h>
+
+#include <netlink/socket.h>
+
+#include <netlink/msg.h>
+
+
+
+/*
+
+ * This function will be called for each valid netlink message received
+
+ * in nl_recvmsgs_default()
+
+ */
+
+static int my_func(struct nl_msg *msg, void *arg)
+
+{
+
+        return 0;
+
+}
+
+
+
+struct nl_sock *sk;
+
+
+
+/* Allocate a new socket */
+
+sk = nl_socket_alloc();
+
+
+
+/*
+
+ * Notifications do not use sequence numbers, disable sequence number
+
+ * checking.
+
+ */
+
+nl_socket_disable_seq_check(sk);
+
+
+
+/*
+
+ * Define a callback function, which will be called for each notification
+
+ * received
+
+ */
+
+nl_socket_modify_cb(sk, NL_CB_VALID, NL_CB_CUSTOM, my_func, NULL);
+
+
+
+/* Connect to routing netlink protocol */
+
+nl_connect(sk, NETLINK_ROUTE);
+
+
+
+/* Subscribe to link notifications group */
+
+nl_socket_add_memberships(sk, RTNLGRP_LINK, 0);
+
+
+
+/*
+
+ * Start receiving messages. The function nl_recvmsgs_default() will block
+
+ * until one or more netlink messages (notification) are received which
+
+ * will be passed on to my_func().
+
+ */
+
+while (1)
+
+        nl_recvmsgs_default(sock);
+```
+
+
+
+
+
+
+
+
+
+#### 分配struct nl_sock
+
+有两种方式，nl_socket_alloc_cb可以在分配struct nl_sock时传入struct nl_cb，nl_socket_alloc直接使用nl_cb_alloc(default_cb)创建一个缺省的struct nl_cb
+
+
+
+![image-20220507112409091](netlink_libnl.assets/image-20220507112409091.png)
+
+​                                                 external/libnl/lib/socket.c
+
+![image-20220507112547778](netlink_libnl.assets/image-20220507112547778.png)
+
+
+
+
+
+#### 创建绑定本地套接字
+
+![image-20220507113314064](netlink_libnl.assets/image-20220507113314064.png)
+
+
+
+
+
+struct nl_sock中指定的本地套接字的port如果是0，则_nl_socket_is_local_port_unspecified返回1，前面__alloc_socket中使用calloc分配的struct nl_sock，因此sk->sk->s_local的port是0.
+
+![image-20220507113544091](netlink_libnl.assets/image-20220507113544091.png)
+
+
+
+实际上绑定的本地地址的port并不是0，而是判断发现未指定port后生成一个随机port然后尝试绑定，如果绑定失败就再生成一个随机port然后再绑定，直到绑定成功或触发一些错误，来看下如何生成这个随机port:
+
+![image-20220507114348344](netlink_libnl.assets/image-20220507114348344.png)
+
+
+
+struct nl_sock * sk，调完
+
+```
+sk = nl_socket_alloc();
+
+nl_connect(sk, NETLINK_GENERIC);
+```
+
+之后sk有如下属性：
+
+
+
+对与本地地址(struct sockaddr_nl):
+
+sk->s_local.nl_family=AF_NETLINK
+
+sk->s_local.nl_pid=ramdom
+
+sk->s_local.nl_groups=0
+
+对与目标地址(struct sockaddr_nl):
+
+sk->s_peer.nl_family=AF_NETLINK
+
+sk->s_peer.nl_pid=0
+
+sk->s_peer.nl_groups=0
+
+创建了一个套接字s_fd并绑定到了本地地址:
+
+sk->s_fd=socket(AF_NETLINK,  SOCK_RAW,   NETLINK_GENERIC)
+
+
+
+
+
+nl_send_auto()中把sk->s_local放到struct msghdr中的msg_name和msg_namelen，然后再调用sendmsg时传入struct msghdr。放入struct msghdr中的msg_name和msg_namelen用于指定发送的目标地址。
+
+
+
+
+
+后续recvmsg不需要指定接收的目标地址
+
+
+
+
+
+
+
+### 3.libnl-genl
+
+针对NETLINK_GENERIC这个netlink协议定制的一个库，该库依赖libnl，经典用法参考external/wpa_supplicant_8/src/drivers/driver_nl80211.c   line1761，即wpa_driver_nl80211_init_nl_global函数
+
+
+
+NETLINK_GENERIC 协议的netlink套接字在应用层指定需要通信地址时可以通过
+
+
+
+libnl-genl库专门用来与内核中的GENERIC Netlink模块通信，在这个过程中并未改变sk->peer，因此最终还是在NETLINK_GENERIC 协议下发送单播数据给内核，内核的GENERIC Netlink模块绑定在了NETLINK_GENERIC 协议的如下地址：
+
+local.nl_family=AF_NETLINK
+
+local.nl_pid=0
+
+local.nl_groups=0
+
+
+
+因此所有从应用空间发往GENERIC Netlink模块的netlink帧都是单播数据。libnl可以用来往内核发单播和组播，只是在使用libnl-genl往内核的GENERIC Netlink模块发送数据时只使用单播数据。
+
+
+
+
+
+
+
+来看下libnl-genl版本的创建绑定套接字：
+
+![image-20220507114838167](netlink_libnl.assets/image-20220507114838167.png)
+
+
+
+
+
+https://blog.csdn.net/user_jiang/article/details/105861480
+
+对于从user to kernel的通讯(由应用发起，内核来响应)，driver必须先向内核注册一个struct genl_family，并且注册一些cmd的处理函数。这些cmd是跟某个family关联起来的。注册family的时候我们可以让内核自动为这个family分配一个ID。每个family都有一个唯一的ID，其中ID号0x10是被内核的nlctrl family所使用。当注册成功以后，如果user program向某个family发送cmd，那么内核就会回调对应cmd的处理函数。对于user program，使用前，除了要创建一个socket并绑定地址以外，还需要先通过family的名字获取family的ID。有了family的ID以后，才能向该family发送cmd，整个过程中使用的是netlink单播。
+
+对于从kernel to user的通讯(由内核发起，可能有也可能没有应用程序响应)，采用的是广播的形式，只要user program监听了，都能收到。但是同样的，user program在监听前，也必须先查询到family的ID，整个过程中使用的是netlink广播。
+
+
+GENERIC Netlink模块中用如下属性来描述一个family：
+
+family_name  family_id  group_name group_id
+
+
+
+
+
+
+
+
+
+
+
+
+
+* 如果要订阅802.11模块中的广播，需要做如下操作：
+
+已知family_name为"nl80211"，group_name为"scan"
+
+1、调用genl_ctrl_resolve查询“nlctrl”这个family_name对应的family_id(nlctrl)。genl_ctrl_resolve是libnl_genl中已经封装好的函数。
+
+2、首先使用family_id(nlctrl)向GENERIC Netlink模块的“nlctrl”的family发送数据查询family_name为"nl80211"的family的所有信息，在这些GENERIC Netlink模块里描述nl80211模块的信息中有family_name、 family_id、group_name、 group_id等等，找到需要加入的group_name对应的group_id。这一步libnl_genl中没有实现相关函数来进行，需要自行处理。
+
+3、使用libnl_genl提供的nl_socket_add_membership函数来让sk->s_fd这个本地socket监听group_id，如此从就能本地socket接收到nl80211模块发出的广播。
+
+
+
+external/wpa_supplicant_8/src/drivers/driver_nl80211.c 中的nl_get_multicast_id函数实现了第1步和第2步，如下：
+
+![image-20220507194324869](netlink_libnl.assets/image-20220507194324869.png)
+
+
+
