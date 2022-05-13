@@ -2160,6 +2160,49 @@ StaNetwork::setKeyMgmt_1_3
 
 ### 5.3  wpa_supplicant中重要数据结构及关系
 
+```
+struct wpa_global变量和 struct nl80211_global 整个程序中只有一个，struct wpa_global变量通过iface指向struct wpa_supplicant链表，
+链表中的每个struct wpa_supplicant变量的global_drv_priv和struct wpa_global变量的drv_priv[i] 都指向了同一个struct nl80211_global
+struct wpa_global.drv_priv[i]   =  struct wpa_supplicant.global_drv_priv   =  struct nl80211_global *
+struct wpa_global.iface = struct wpa_supplicant *
+
+
+
+
+
+对于每个struct wpa_supplicant变量，都有一个struct i802_bss变量和一个struct wpa_driver_nl80211_data变量
+struct wpa_supplicant.global_drv_priv  =  struct nl80211_global*
+struct wpa_supplicant.drv_priv         =  struct i802_bss*
+
+
+
+struct i802_bss.drv        = struct wpa_driver_nl80211_data*
+struct i802_bss.ctx        = struct wpa_supplicant *
+struct i802_bss.nl_cb      = struct nl_cb *
+struct i802_bss.nl_connect = struct nl_sock *
+
+struct wpa_driver_nl80211_data.global        = struct nl80211_global *
+struct wpa_driver_nl80211_data.first_bss     = struct i802_bss *
+struct wpa_driver_nl80211_data.ctx           = struct wpa_supplicant *
+struct wpa_driver_nl80211_data.eapol_tx_sock = socket(PF_PACKET, SOCK_DGRAM, 0)
+
+
+struct nl80211_global.nl=struct nl_sock *
+struct nl80211_global.nl_event=struct nl_sock *
+struct nl80211_global.nl_cb = nl_cb_alloc(NL_CB_DEFAULT);
+struct nl80211_global.ctx=struct wpa_global *
+struct nl80211_global.ioctl_sock = socket(PF_INET, SOCK_DGRAM, 0)
+struct nl80211_global.ioctl_sock = socket(PF_INET, SOCK_DGRAM, 0)
+struct nl80211_global.netlink.sock= socket(PF_NETLINK, SOCK_RAW, NETLINK_ROUTE)
+struct nl80211_global.netlink.cfg.newlink_cb = wpa_driver_nl80211_event_rtm_newlink
+struct nl80211_global.netlink.cfg.dellink_cb = wpa_driver_nl80211_event_rtm_dellink
+struct nl80211_global.netlink.cfg.ctx=struct nl80211_global *
+
+
+
+
+```
+
 
 
 
@@ -3621,9 +3664,57 @@ SupplicantStaNetworkHal的saveWifiConfiguration方法根据WifiConfiguration调�
 
 
 
+#### 6.5.6 StaNetwork::setKeyMgmt
+
+前面SupplicantStaNetworkHal中调用saveWifiConfiguration方法时设置需要连接网络的类型:
+
+![image-20220511201641525](wifi.assets/image-20220511201641525.png)
 
 
-#### 6.3. StaNetwork::select
+
+wifiConfigurationToSupplicantKeyMgmtMask将WifiConfiguration中的key_mgmt和hidl中的key_mgmt进行映射转换：
+
+![image-20220511201829789](wifi.assets/image-20220511201829789.png)
+
+
+
+看下hal文件中定义的key_mgmt是多少，一下只展示1.0版本的，后面1.x版本下的ISupplicantStaNetwork.hal可能会对其进行拓展：
+
+![image-20220511202150384](wifi.assets/image-20220511202150384.png)
+
+
+
+
+
+![image-20220511201254685](wifi.assets/image-20220511201254685.png)
+
+
+
+通过hidl调用到wpa对应的hidl方法后传入的是key_mgmt在hal文件中定义的值:
+
+![image-20220511194409391](wifi.assets/image-20220511194409391.png)
+
+![image-20220511194447948](wifi.assets/image-20220511194447948.png)
+
+![image-20220511194533691](wifi.assets/image-20220511194533691.png)
+
+来看下wpa_supplciant中对key_mgmt的定义：
+
+![image-20220511203302803](wifi.assets/image-20220511203302803.png)
+
+因此：
+
+**当在WifiConfiguration中选择KeyMgmt时WPA_PSK，wpa_supplicant内部设置的key_mgmt为WPA_KEY_MGMT_FT_PSK**
+
+**当在WifiConfiguration中选择KeyMgmt时WPA_EAP，wpa_supplicant内部设置的key_mgmt为WPA_KEY_MGMT_FT_IEEE8021X**
+
+
+
+
+
+
+
+#### 6.5.7 StaNetwork::select
 
 SupplicantStaIfaceHal通过调用StaNetwork代理端的select方法调到了wpa_supplicant中的C++具体实现的select方法：
 
@@ -3951,33 +4042,37 @@ external/wpa_supplicant_8/wpa_supplicant/events.c
 1721  }
 ```
 
-接下来的流程分为SME auth和exteral auth两种，根据virtual interface创建时从驱动获取的flag是否有WPA_DRIVER_FLAGS_SME标志来决定，即是否支持SME，SME的详细的解释可以看这篇：https://blog.csdn.net/qq_33307581/article/details/110151985
+
+
+##### wpa_supplicant_associate
+
+wpa_supplicant_associate中对于是否支持SME做了不同的处理。
 
 
 
-#####  SME auth 流程
+SME的详细的解释可以看这篇：https://blog.csdn.net/qq_33307581/article/details/110151985
 
-可参考https://blog.csdn.net/krokodil98/article/details/118612374
+SME 流程可参考https://blog.csdn.net/krokodil98/article/details/118612374
 
-###### 802.11 auth
-
-external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
-
-```
-2118  void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
-2119  			      struct wpa_bss *bss, struct wpa_ssid *ssid)
-2120  {
-......
-2266  	if ((wpa_s->drv_flags & WPA_DRIVER_FLAGS_SME) &&
-2267  	    ssid->mode == WPAS_MODE_INFRA) {
-2268  		sme_authenticate(wpa_s, bss, ssid);
-2269  		return;
-2270  	}
-......
-2302  }
-```
+external流程可参考  https://blog.csdn.net/krokodil98/article/details/118761897
 
 
+
+wpa_supplicant_associate，根据virtual interface创建时从驱动获取的flag是否有WPA_DRIVER_FLAGS_SME标志来决定，即是否支持SME，如果支持则调用sme_auth，如果不支持即external流程注册了一个wpas_start_assoc_cb回调函数，后续交给该回调函数处理。
+
+
+
+​                                   external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
+
+![image-20220512152833213](wifi.assets/image-20220512152833213.png)
+
+
+
+#####  SME 流程
+
+wpa_supplicant_associate中对于SME 流程调用sme_authenticate进行处理：
+
+###### 802.11 sme_auth
 
 ![image-20220428171839656](wifi.assets/image-20220428171839656.png)
 
@@ -3991,7 +4086,7 @@ external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 
 
 
-```
+```c
 280  static void sme_send_authentication(struct wpa_supplicant *wpa_s,
 281  				    struct wpa_bss *bss, struct wpa_ssid *ssid,
 282  				    int start)
@@ -4072,7 +4167,7 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211.c
 3632  	wpa_printf(MSG_DEBUG, "nl80211: Authenticate (ifindex=%d)",
 3633  		   drv->ifindex);
 3634  
-3635  	msg = nl80211_drv_msg(drv, 0, NL80211_CMD_AUTHENTICATE);//把NL80211_CMD_AUTHENTICATE放入msg
+3635  	msg = nl80211_drv_msg(drv, 0, NL80211_CMD_AUTHENTICATE);//把NL80211_CMD_AUTHENTICATE放入msg,后续驱动回复该事件
 ......//设置各种参数
 3700  	ret = send_and_recv_msgs(drv, msg, NULL, NULL);//发送msg给驱动
 3701  	msg = NULL;
@@ -4093,7 +4188,7 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211.c
 3773  }
 ```
 
-
+调用nl80211_drv_msg来构造需要发送的msg
 
 ![image-20220429175208791](wifi.assets/image-20220429175208791.png)
 
@@ -4101,51 +4196,291 @@ external/wpa_supplicant_8/src/drivers/driver_nl80211.c
 
 ![image-20220429175241984](wifi.assets/image-20220429175241984.png)
 
-
+ cmd对于NL80211_CMD_AUTHENTICATE，往msg中填充cmd
 
 ![image-20220429175307504](wifi.assets/image-20220429175307504.png)
 
+构造完msg后返回到wpa_driver_nl80211_authenticate中后续再对msg进行一些填充，然后调用send_and_recv_msgs来发送msg，第三个参数和第四个参数为空。
 
+![image-20220511145931998](wifi.assets/image-20220511145931998.png)
 
-![image-20220429175755746](wifi.assets/image-20220429175755746.png)
+​                                 external/wpa_supplicant_8/src/drivers/driver_nl80211.c
 
-
-
-
-
-
-
+![image-20220511150430973](wifi.assets/image-20220511150430973.png)
 
 
 
+**注意send_and_recv_msgs中调用send_and_recv时传入的前两个参数:**
 
-#####  external auth 流程
+* 第一个参数struct wpa_driver_nl80211_data.global= struct wpa_supplicant.global_drv_priv=struct wpa_global.drv_priv[i] = struct nl80211_global \*，传入了struct nl80211_global \*  
+* 第二个参数struct nl80211_global.nl=struct nl_sock \*  
 
-可参考  https://blog.csdn.net/krokodil98/article/details/118761897
+在**send_and_recv**中使用使用传入第一个参数struct nl80211_global的**nl_cb**克隆一个回调结构体，然后使用传入的第二个参数struct nl80211_global.**nl**对应的fd来发送msg，然后调用 nl_recvmsgs从nl的fd中接收netlink数据，并调用回调结构体中的相关函数进行处理。来看下nl_cb中的回调函数到底是什么，在创建初始化interface时wpa_driver_nl80211_init_nl_global函数中有如下这段：
+
+![image-20220510160109292](wifi.assets/image-20220510160109292.png)
+
+nl_cb_set函数将global->nl_cb的回调函数设置成了process_global_event，看下它的实现:
+
+![image-20220510160426764](wifi.assets/image-20220510160426764.png)
 
 
 
-###### 802.11 auth and associate
+external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c      do_process_drv_event函数的switch case部分：
 
-```
-2118  void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
-2119  			      struct wpa_bss *bss, struct wpa_ssid *ssid)
-2120  {
+![image-20220512100031703](wifi.assets/image-20220512100031703.png)
+
+
+
+
+
+do_process_drv_event中的switch case 是NL80211_CMD_AUTHENTICATE，因此调到了mlme_event函数：
+
+external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c
+
+```c
+921  static void mlme_event(struct i802_bss *bss,
+922  		       enum nl80211_commands cmd, struct nlattr *frame,
+923  		       struct nlattr *addr, struct nlattr *timed_out,
+924  		       struct nlattr *freq, struct nlattr *ack,
+925  		       struct nlattr *cookie, struct nlattr *sig,
+926  		       struct nlattr *wmm, struct nlattr *req_ie)
+927  {
 ......
-2298  	if (radio_add_work(wpa_s, bss ? bss->freq : 0, "connect", 1,
-2299  			   wpas_start_assoc_cb, cwork) < 0) {
-2300  		os_free(cwork);
-2301  	}
-2302  }
+970  	switch (cmd) {
+971  	case NL80211_CMD_AUTHENTICATE:
+972  		mlme_event_auth(drv, nla_data(frame), nla_len(frame));
+973  		break;
+974  	case NL80211_CMD_ASSOCIATE:
+975  		mlme_event_assoc(drv, nla_data(frame), nla_len(frame), wmm,
+976  				 req_ie);
+977  		break;
+......
+1005  	default:
+1006  		break;
+1007  	}
+1008  }
 ```
 
 
 
+![image-20220511151424149](wifi.assets/image-20220511151424149.png)
+
+
+
+![image-20220511151633554](wifi.assets/image-20220511151633554.png)
+
+external/wpa_supplicant_8/wpa_supplicant/sme.c
+
+```c
+1454  void sme_event_auth(struct wpa_supplicant *wpa_s, union wpa_event_data *data)
+1455  {
+......//经过一系列判断，如果不使用SAE且从驱动返回802.11认证成功则接下来进行关联
+1628  	sme_associate(wpa_s, ssid->mode, data->auth.peer,
+1629  		      data->auth.auth_type);
+1630  }
+```
+
+总结，从驱动接收数据后，调用nl_cb中的process_global_event 进行处理，对于sme_auth流程:
+
+process_global_event(NL80211_CMD_AUTHENTICATE)->
+
+do_process_drv_event(NL80211_CMD_AUTHENTICATE)->
+
+mlme_event(NL80211_CMD_AUTHENTICATE)->
+
+mlme_event_auth->
+
+wpa_supplicant_event(drv->ctx, EVENT_AUTH, &event)->
+
+sme_event_auth->
+
+sme_associate
+
+######    802.11 sme_associate
+
+sme_event_auth中处理802.11认证事情时如果认证成功则调用sme_associate进行后续的关联操作：
+
+external/wpa_supplicant_8/wpa_supplicant/sme.c
+
+```c
+1649  void sme_associate(struct wpa_supplicant *wpa_s, enum wpas_mode mode,
+1650  		   const u8 *bssid, u16 auth_type)
+1651  {
+......  //填充关联所需的一些参数
+2008  	if (wpa_drv_associate(wpa_s, &params) < 0) {
+2009  		wpa_msg(wpa_s, MSG_INFO, "SME: Association request to the "
+2010  			"driver failed");
+2011  		wpas_connection_failed(wpa_s, wpa_s->pending_bssid);
+2012  		wpa_supplicant_set_state(wpa_s, WPA_DISCONNECTED);
+2013  		os_memset(wpa_s->pending_bssid, 0, ETH_ALEN);
+2014  		return;
+2015  	}
+2016  
+2017  	eloop_register_timeout(SME_ASSOC_TIMEOUT, 0, sme_assoc_timer, wpa_s,
+2018  			       NULL);
+2019  
+2020  #ifdef CONFIG_TESTING_OPTIONS
+2021  	wpabuf_free(wpa_s->last_assoc_req_wpa_ie);
+2022  	wpa_s->last_assoc_req_wpa_ie = NULL;
+2023  	if (params.wpa_ie)
+2024  		wpa_s->last_assoc_req_wpa_ie =
+2025  			wpabuf_alloc_copy(params.wpa_ie, params.wpa_ie_len);
+2026  #endif /* CONFIG_TESTING_OPTIONS */
+2027  }
+```
+
+
+
+![image-20220511152706103](wifi.assets/image-20220511152706103.png)
+
+![image-20220511152734483](wifi.assets/image-20220511152734483.png)
 
 
 
 
-external auth是wpa_supplicant_associate函数的另一种处理方式
+
+external/wpa_supplicant_8/src/drivers/driver_nl80211.c
+
+```c
+6117  static int wpa_driver_nl80211_associate(
+6118  	void *priv, struct wpa_driver_associate_params *params)
+6119  {
+......
+......
+6133  	if (!(drv->capa.flags & WPA_DRIVER_FLAGS_SME)) {//因为支持SME，取反后不满足if条件
+6134  		enum nl80211_iftype nlmode = params->p2p ?
+6135  			NL80211_IFTYPE_P2P_CLIENT : NL80211_IFTYPE_STATION;
+6136  
+6137  		if (wpa_driver_nl80211_set_mode(priv, nlmode) < 0)
+6138  			return -1;
+6139  		if (params->key_mgmt_suite == WPA_KEY_MGMT_SAE ||
+6140  		    params->key_mgmt_suite == WPA_KEY_MGMT_FT_SAE)
+6141  			bss->use_nl_connect = 1;
+6142  		else
+6143  			bss->use_nl_connect = 0;
+6144  
+6145  		return wpa_driver_nl80211_connect(drv, params,
+6146  						  get_connect_handle(bss));//后面的external auth走这个流程
+6147  	}
+......
+6153  	msg = nl80211_drv_msg(drv, 0, NL80211_CMD_ASSOCIATE);//后期驱动回复数据时对应上报NL80211_CMD_ASSOCIATE这个事件
+......
+6181  	ret = send_and_recv_msgs_owner(drv, msg,
+6182  				       get_connect_handle(drv->first_bss), 1,
+6183  				       NULL, NULL);
+......
+6198  }
+```
+
+wpa_driver_nl80211_associate中调用send_and_recv_msgs_owner之前先调用get_connect_handle(drv->first_bss)获取 struct nl_sock *
+
+![image-20220511153401793](wifi.assets/image-20220511153401793.png)
+
+再看下send_and_recv_msgs_owner：
+
+![image-20220511154942819](wifi.assets/image-20220511154942819.png)
+
+综上，在使用SME的情况下，不管是否使用SAE：
+
+* 如果驱动不支持Control port，get_connect_handle返回NULL，handle为NULL，msg中也不需要填NL80211_ATTR_CONTOL_PORT的相关属性，send_and_recv_msgs_owner跟send_and_recv_msgs等价。此时使用nl中的netlink socket发送数据到驱动。
+
+* 如果驱动支持Control port，get_connect_handle返回bss->nl_connect，handle为bss->nl_connect，send_and_recv_msgs_owner需要先填入NL80211_ATTR_CONTOL_PORT，且后续再调用send_and_recv时传入的第二个参数不再是nl，而是nl_connect。此时使用nl_connect中的netlink socket发送数据到驱动。
+
+
+
+
+
+相关参数描述如下：
+
+* struct i802_bss*  = struct wpa_supplicant.drv_priv   =   struct wpa_global.drv_priv[i]
+
+* struct wpa_driver_nl80211_data *  =   struct i802_bss.drv
+
+* struct nl80211_global *   = struct wpa_driver_nl80211_data.global   =   struct wpa_global.drv_priv[i]   =  struct wpa_supplicant.global_drv_priv
+
+
+
+send_and_recv接收数据后调用传入的第一个参数的nl_cb成员里面的函数指针，即 struct wpa_driver_nl80211_data.global.nl_cb
+
+这个回调对象里面的函数指针，根据前面分析，nl_cb中的回调函数是process_global_event，process_global_event调用到了do_process_drv_event，此时do_process_drv_event中switch case 是NL80211_CMD_ASSOCIATE，与sme_auth时不同(switch case 是NL80211_CMD_AUTHENTICATE），do_process_drv_event中调用mlme_event来处理：
+
+external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c      do_process_drv_event函数的switch case部分：
+
+![image-20220512100031703](wifi.assets/image-20220512100031703.png)
+
+在mlme_event函数中，与sme_auth时不同(switch case 是NL80211_CMD_AUTHENTICATE，调用mlme_event_auth来处理），sme_associate时(switch case 是NL80211_CMD_ASSOCIATE)调用mlme_event_assoc来处理：
+
+````c
+921  static void mlme_event(struct i802_bss *bss,
+922  		       enum nl80211_commands cmd, struct nlattr *frame,
+923  		       struct nlattr *addr, struct nlattr *timed_out,
+924  		       struct nlattr *freq, struct nlattr *ack,
+925  		       struct nlattr *cookie, struct nlattr *sig,
+926  		       struct nlattr *wmm, struct nlattr *req_ie)
+927  {
+......
+970  	switch (cmd) {
+971  	case NL80211_CMD_AUTHENTICATE:
+972  		mlme_event_auth(drv, nla_data(frame), nla_len(frame));
+973  		break;
+974  	case NL80211_CMD_ASSOCIATE:
+975  		mlme_event_assoc(drv, nla_data(frame), nla_len(frame), wmm,
+976  				 req_ie);
+977  		break;
+......
+1005  	default:
+1006  		break;
+1007  	}
+1008  }
+````
+
+与sme_auth时类似，mlme_event_auth和mlme_event_assoc准备都调用wpa_supplicant_event
+
+external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c
+
+```c
+213  static void mlme_event_assoc(struct wpa_driver_nl80211_data *drv,
+214  			     const u8 *frame, size_t len, struct nlattr *wmm,
+215  			     struct nlattr *req_ie)
+216  {
+217  	const struct ieee80211_mgmt *mgmt;
+218  	union wpa_event_data event;
+......
+234  	mgmt = (const struct ieee80211_mgmt *) frame;
+......
+261  	os_memset(&event, 0, sizeof(event));
+......//根据驱动回复的数据填充event
+290  	wpa_supplicant_event(drv->ctx, EVENT_ASSOC, &event);
+291  }
+```
+
+
+
+external/wpa_supplicant_8/wpa_supplicant/events.c   函数 wpa_supplicant_event中的switch case:
+
+
+
+![image-20220512142543086](wifi.assets/image-20220512142543086.png)
+
+总结，从驱动接收数据后，调用nl_cb中的process_global_event 进行处理，对于sme_associate流程:
+
+process_global_event(NL80211_CMD_ASSOCIATE)->
+
+do_process_drv_event(NL80211_CMD_ASSOCIATE)->
+
+mlme_event(NL80211_CMD_ASSOCIATE)->
+
+mlme_event_assoc->
+
+wpa_supplicant_event(drv->ctx, EVENT_ASSOC, &event)->
+
+wpa_supplicant_event_assoc
+
+
+
+#####  external 流程
+
+wpa_supplicant_associate中对于不支持SME即external流程使用radio_add_work注册了wpas_start_assoc_cb回调函数（超时时间是0,因此后续能马上得到调用），来看下wpas_start_assoc_cb如何处理：
 
 external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 
@@ -4168,109 +4503,214 @@ external/wpa_supplicant_8/wpa_supplicant/wpa_supplicant.c
 
 
 
-external/wpa_supplicant_8/src/drivers/driver_nl80211.c
+![image-20220511152856200](wifi.assets/image-20220511152856200.png)
 
+wpa_driver_nl80211_associate在因为不支持WPA_DRIVE_FLAGS_SME,取反后满足if条件，所以wpa_driver_nl80211_associate调用到了wpa_driver_nl80211_connect，在不使用SAE 的情况下bss->use_nl_connect = 0 ，看get_connect_handle(bss)返回的是什么：
+
+![image-20220511153401793](wifi.assets/image-20220511153401793.png)
+
+get_connect_handle的返回值就是调用wpa_driver_nl80211_connect时的第三个参数：
+
+![image-20220511153826319](wifi.assets/image-20220511153826319.png)
+
+wpa_driver_nl80211_connect先调用nl80211_drv_ms构造一个msg，不同的是现在的cmd是NL80211_CMD_CONNECT，经过一系列对msg的填充后调用send_and_recv_msgs_owner：
+
+![image-20220511154942819](wifi.assets/image-20220511154942819.png)
+
+综上，在不支持SME的情况(external 流程)下
+
+* 如果要使用SAE，则bss->use_nl_connect ==1,get_connect_handle返回bss->nl_connect，后续使用nl_connect里面socket套接字发送接收数据。
+
+* 在不使用SAE的情况下，如果驱动不支持Control port，get_connect_handle返回NULL，handle为NULL，msg中也不需要填NL80211_ATTR_CONTOL_PORT的相关属性，此时send_and_recv_msgs_owner跟sme_auth时调用的send_and_recv_msgs等价。此时使用nl中的netlink socket与驱动发送接收数据。如果驱动支持Control port，get_connect_handle返回bss->nl_connect，handle为bss->nl_connect，send_and_recv_msgs_owner需要先填入NL80211_ATTR_CONTOL_PORT，且后续再调用send_and_recv时传入的第二个参数不再是nl，而是nl_connect。此时使用nl_connect中的netlink socket发送数据到驱动。
+
+
+
+相关参数描述如下：
+
+* struct i802_bss*  = struct wpa_supplicant.drv_priv   =   struct wpa_global.drv_priv[i]
+
+* struct wpa_driver_nl80211_data *  =   struct i802_bss.drv
+
+* struct nl80211_global *   = struct wpa_driver_nl80211_data.global   =   struct wpa_global.drv_priv[i]   =  struct wpa_supplicant.global_drv_priv
+
+  
+
+send_and_recv接收数据后调用传入的第一个参数的nl_cb成员里面的函数指针，即 struct wpa_driver_nl80211_data.global.nl_cb
+
+这个回调对象里面的函数指针，根据前面分析，nl_cb中的回调函数是process_global_event，process_global_event调用到了do_process_drv_event，此时do_process_drv_event中switch case 是NL80211_CMD_CONNECT，与sme_auth时不同(switch case 是NL80211_CMD_AUTHENTICATE），do_process_drv_event中调用mlme_event_connect来处理：
+
+![image-20220512095911160](wifi.assets/image-20220512095911160.png)
+
+
+
+
+
+在mlme_event开始于sme_auth时的处理变得不同，因为是NL80211_CMD_ASSOCIATE，所以调用到了mlme_event_assoc：
+
+
+
+mlme_event_assoc先判断驱动是否回复关联成功，如果成功则跟前面sme_auth时一样都调用wpa_supplicant_event来处理，只是传进来的参数不同：
+
+```c
+294  static void mlme_event_connect(struct wpa_driver_nl80211_data *drv,
+295  			       enum nl80211_commands cmd, struct nlattr *status,
+296  			       struct nlattr *addr, struct nlattr *req_ie,
+297  			       struct nlattr *resp_ie,
+298  			       struct nlattr *timed_out,
+299  			       struct nlattr *timeout_reason,
+300  			       struct nlattr *authorized,
+301  			       struct nlattr *key_replay_ctr,
+302  			       struct nlattr *ptk_kck,
+303  			       struct nlattr *ptk_kek,
+304  			       struct nlattr *subnet_status,
+305  			       struct nlattr *fils_erp_next_seq_num,
+306  			       struct nlattr *fils_pmk,
+307  			       struct nlattr *fils_pmkid)
+308  {
+309  	union wpa_event_data event;
+......
+336  	os_memset(&event, 0, sizeof(event));
+......//判断驱动是否回复关联成功，如果成功则把驱动回复的相关ATTR保存到event，然后调用wpa_supplicant_event
+473  	wpa_supplicant_event(drv->ctx, EVENT_ASSOC, &event);
+474  }
 ```
-6117  static int wpa_driver_nl80211_associate(
-6118  	void *priv, struct wpa_driver_associate_params *params)
-6119  {
-......
-6153  	msg = nl80211_drv_msg(drv, 0, NL80211_CMD_ASSOCIATE);
-......
-6181  	ret = send_and_recv_msgs_owner(drv, msg,
-6182  				       get_connect_handle(drv->first_bss), 1,
-6183  				       NULL, NULL);
-......
-6198  }
-```
 
 
 
-![image-20220305171757645](wifi.assets/image-20220305171757645.png)
+wpa_supplicant_event用wpa_supplicant_event_assoc来进行后续处理。
+
+![image-20220512142543086](wifi.assets/image-20220512142543086.png)
 
 
 
-##### 
+综上，从驱动接收数据后，调用nl_cb中的process_global_event 进行处理，对于external这种auth和associate一起做的流程：
 
-驱动回复数据后调用回调函数do_process_drv_event函数来处理NL80211_CMD_CONNECT事件：
+process_global_event(NL80211_CMD_CONNECT)->
 
-external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c
+do_process_drv_event(NL80211_CMD_CONNECT)->
 
-```
-2577  static void do_process_drv_event(struct i802_bss *bss, int cmd,
-2578  				 struct nlattr **tb)
-2579  {
-......
-2607  	switch (cmd) {
-......
-2685  	case NL80211_CMD_CONNECT:
-2686  	case NL80211_CMD_ROAM:
-2687  		mlme_event_connect(drv, cmd,
-2688  				   tb[NL80211_ATTR_STATUS_CODE],
-2689  				   tb[NL80211_ATTR_MAC],
-2690  				   tb[NL80211_ATTR_REQ_IE],
-2691  				   tb[NL80211_ATTR_RESP_IE],
-2692  				   tb[NL80211_ATTR_TIMED_OUT],
-2693  				   tb[NL80211_ATTR_TIMEOUT_REASON],
-2694  #ifdef CONFIG_MTK_COMMON
-2695  				   tb[NL80211_ATTR_PORT_AUTHORIZED], NULL, NULL,
-2696  #else
-2697  				   NULL, NULL, NULL,
-2698  #endif
-2699  				   tb[NL80211_ATTR_FILS_KEK],
-2700  				   NULL,
-2701  				   tb[NL80211_ATTR_FILS_ERP_NEXT_SEQ_NUM],
-2702  				   tb[NL80211_ATTR_PMK],
-2703  				   tb[NL80211_ATTR_PMKID]);
-2704  		break;
-......
-}
-```
+mlme_event_connect(NL80211_CMD_CONNECT)->
+
+wpa_supplicant_event(drv->ctx, EVENT_ASSOC, &event)->
+
+wpa_supplicant_event_assoc
 
 
 
-external/wpa_supplicant_8/src/drivers/driver_nl80211_event.c
+##### wpa_supplicant_event_assoc
 
-```
-213  static void mlme_event_assoc(struct wpa_driver_nl80211_data *drv,
-214  			     const u8 *frame, size_t len, struct nlattr *wmm,
-215  			     struct nlattr *req_ie)
-216  {
-......
-290  	wpa_supplicant_event(drv->ctx, EVENT_ASSOC, &event);
-291  }
-```
+wpa_supplicant_associate中对于是否支持SME做了两种不同的处理流程，SME流程先发送NL80211_CMD_AUTHENTICATE命令，然后接收并处理NL80211_CMD_AUTHENTICATE命令，处理的过程中如果802.11认证成功再发送NL80211_CMD_ASSOCIATE命令，然后再接收并处理NL80211_CMD_ASSOCIATE命令，在处理时如果802.11关联成功最终调到了wpa_supplicant_event_assoc函数
 
-经过判断如果成功认证关联则调用wpa_supplicant_event_assoc进行后续处理
+不支持SME即external流程先发送NL80211_CMD_CONNECT命令，然后接收并处理NL80211_CMD_CONNECT命令，在处理时如果802.11认证和802.11关联都成功了最终就调用wpa_supplicant_event_assoc函数
+
+不管是否支持SME，最终在关联成功后都是调用wpa_supplicant_event_assoc函数,，来看下它的实现：
 
 external/wpa_supplicant_8/wpa_supplicant/events.c
 
-```
-4594  void wpa_supplicant_event(void *ctx, enum wpa_event_type event,
-4595  			  union wpa_event_data *data)
-4596  {
-......
-4642  	case EVENT_ASSOC:
-......
-4655  		wpa_supplicant_event_assoc(wpa_s, data);
-......
-5413  }
-```
-
-
-
-external/wpa_supplicant_8/wpa_supplicant/events.c
-
-```
+```c
 2987  static void wpa_supplicant_event_assoc(struct wpa_supplicant *wpa_s,
 2988  				       union wpa_event_data *data)
 2989  {
-
-
+2990  	u8 bssid[ETH_ALEN];
+2991  	int ft_completed, already_authorized;
+......
+3010  	eloop_cancel_timeout(wpas_network_reenabled, wpa_s, NULL);
+3011  	wpa_s->own_reconnect_req = 0;
+3012    //注意前面设置的key_mgmt，WPA_KEY_MGMT_FT，因此ft_completed == sm->ft_completed,sm的类型是struct wpa_sm *
+3013  	ft_completed = wpa_ft_is_completed(wpa_s->wpa);//wpa_s->wpa的类型是struct wpa_sm *
+3014  	if (data && wpa_supplicant_event_associnfo(wpa_s, data) < 0)
+3015  		return;
+3016  	/*
+3017  	 * FILS authentication can share the same mechanism to mark the
+3018  	 * connection fully authenticated, so set ft_completed also based on
+3019  	 * FILS result.
+3020  	 */
+3021  	if (!ft_completed)
+3022  		ft_completed = wpa_fils_is_completed(wpa_s->wpa);
+......
+3105  	/*
+3106  	 * Set portEnabled first to false in order to get EAP state machine out
+3107  	 * of the SUCCESS state and eapSuccess cleared. Without this, EAPOL PAE
+3108  	 * state machine may transit to AUTHENTICATING state based on obsolete
+3109  	 * eapSuccess and then trigger BE_AUTH to SUCCESS and PAE to
+3110  	 * AUTHENTICATED without ever giving chance to EAP state machine to
+3111  	 * reset the state.
+3112  	 */
+3113  	if (!ft_completed && !already_authorized) {//now,  already_authorized == 0
+3114  		eapol_sm_notify_portEnabled(wpa_s->eapol, false);//Disable 802.1x port
+3115  		eapol_sm_notify_portValid(wpa_s->eapol, false);//ivalidate 802.1x port
+3116  	}
+3117  	if (wpa_key_mgmt_wpa_psk(wpa_s->key_mgmt) ||
+3118  	    wpa_s->key_mgmt == WPA_KEY_MGMT_DPP ||
+3119  	    wpa_s->key_mgmt == WPA_KEY_MGMT_OWE || ft_completed ||
+3120  	    already_authorized || wpa_s->drv_authorized_port)//already_authorized == 0
+3121  		eapol_sm_notify_eap_success(wpa_s->eapol, false);//start eapol state machine
+3122  	/* 802.1X::portControl = Auto */
+3123  	eapol_sm_notify_portEnabled(wpa_s->eapol, true);//enable 802.1x port after init sucessfully
+3124  	wpa_s->eapol_received = 0;
+......
+3146  	wpa_supplicant_cancel_scan(wpa_s);
+......
+3243  	wpas_wps_notify_assoc(wpa_s, bssid);
+3244  
+3245  	if (data) {
+3246  		wmm_ac_notify_assoc(wpa_s, data->assoc_info.resp_ies,
+3247  				    data->assoc_info.resp_ies_len,
+3248  				    &data->assoc_info.wmm_params);
+3249  
+3250  		if (wpa_s->reassoc_same_bss)
+3251  			wmm_ac_restore_tspecs(wpa_s);
+3252  	}
+......
 3273  }
 ```
 
 
+
+wpa_supplicant_event_assoc中首先根据要连接网络的key_mgmt类型来设置ft_completed，来看下，如果key_mgmt是ft，则ft_completed就是wpa_s->wpa->ft_completed
+
+![image-20220511210930176](wifi.assets/image-20220511210930176.png)
+
+![image-20220511211129988](wifi.assets/image-20220511211129988.png)
+
+回到wpa_supplicant_event_assoc，判断下此时如果如果ft_completed为0，则ft_completed就是key_mgmt为fils时的ft_completed,此时：
+
+![image-20220511211559742](wifi.assets/image-20220511211559742.png)
+
+如果支持fils类型的key_mgmt，则ft_completed仍然是wpa_s->wpa->ft_completed，否则是0。
+
+fils类型的key_mgmt如下：
+
+external/wpa_supplicant_8/src/common/defs.h
+
+```
+45  #define WPA_KEY_MGMT_FILS_SHA256 BIT(18)
+46  #define WPA_KEY_MGMT_FILS_SHA384 BIT(19)
+47  #define WPA_KEY_MGMT_FT_FILS_SHA256 BIT(20)
+48  #define WPA_KEY_MGMT_FT_FILS_SHA384 BIT(21)
+```
+
+结合前面设置key_mgmt的分析，如果在WifiConfiguration中指定使用WPA_PSK，则ft_completed总是取决于wpa_s->wpa->ft_completed，如果指定使用WPA_EAP，则ft_completed为始终0 。
+
+
+
+##### eapol_sm_notify_eap_success(wpa_s->eapol, false)
+
+![image-20220513140907040](wifi.assets/image-20220513140907040.png)
+
+
+
+![image-20220513140952525](wifi.assets/image-20220513140952525.png)
+
+
+
+![image-20220513141153254](wifi.assets/image-20220513141153254.png)
+
+状态机相关的宏参考external/wpa_supplicant_8/src/utils/state_machine.h
+
+在eapol_sm_step中不断循环调用SM_STEP_RUN来运行各种状态机，直到struct eapol_sm *sm->changed为false时退出eapol_sm_step循环，此外当循环100次也会离开循环(CPU占用时间太久了，需要临时退出去处理一下epoll队列中其他fd的可读写事件)，后续判断是因为timeout则使用eloop_register_timeout注册一个超时时间为0的回调函数eapol_sm_step_timeout，其中继续调用eapol_sm_step进行状态切换：
+
+![image-20220513142151055](wifi.assets/image-20220513142151055.png)
 
 
 
@@ -4310,7 +4750,7 @@ d->last_config = c
 
 
 ######RX,packet type ==0x00 eapol-packet,   code=Request/type=0x5a(PEAP_90), type data =0x20( SSL: Received packet - Flags 0x20)
-######TX,packet type ==0x00 eapol-packet,   code=Response/type=0x5a(PEAP_90), type data= 明文  “客户”->“服务器”： handshake/client hello 
+######TX,packet type ==0x00 eapol-packet,   code=Response/type=0x5a(PEAP_90), type data= 明文  “客户”->“服务器”： handshake/client hello
 
 
 ######RX,packet type ==0x00 eapol-packet,   code=Request/type=0x5a(PEAP_90), type data = 明文 “服务器”->“客户”：你好，我是服务器，这里是数字证书的内容(包含公钥)，请查收。 

@@ -1692,9 +1692,12 @@ system/libvintf/VintfObject.cpp
 
 
 
+```
+. build/envsetup.sh
+lunch <product_name>
 
 
-hashNum=\`hidl-gen -L hash -r android.hardware:hardware/interfaces -r android.hidl:system/libhidl/transport android.hardware.wifi.supplicant@1.0::ISupplicantStaNetworkCallback\`
+hashNum=`hidl-gen -L hash -r android.hardware:hardware/interfaces -r android.hidl:system/libhidl/transport android.hardware.wifi.supplicant@1.0::ISupplicantStaNetworkCallback`
 
 
 
@@ -1704,12 +1707,17 @@ sed -i "/android.hardware.wifi.supplicant@1.0::ISupplicantStaNetworkCallback/s/^
 
 sudo dpkg-reconfigure dash  选择No,把/bin/sh切换成bash
 
-./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.0 -product  \<product_name\>
-./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.1 -product \<product_name\>
-./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.2 -product \<product_name\>
-./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.3 -product \<product_name\>
+./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.0 -product ${TARGET_PRODUCT}
+./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.1 -product ${TARGET_PRODUCT}
+./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.2 -product ${TARGET_PRODUCT}
+./development/vndk/tools/header-checker/utils/create_reference_dumps.py  -l android.hardware.wifi.supplicant@1.3 -product ${TARGET_PRODUCT}
 
-其中product_name为lunch选择的产品名，需要根据实际进行替换，不带userdebug、eng
+其中TARGET_PRODUCT就是product_name，即lunch选择的产品名，需要根据实际进行替换，不带userdebug、eng
+```
+
+
+
+
 
 ### 9. 代理端获取服务及服务实现进程启动
 
@@ -2635,6 +2643,8 @@ const auto& ret_pair = (obj->*work)(std::forward<Args>(args)...); 相当于调�
 
 
 ### 11. 类型映射
+
+https://blog.csdn.net/shift_wwx/article/details/86531179
 
 ![image-20220118202934046](安卓hal层服务.assets/image-20220118202934046.png)
 

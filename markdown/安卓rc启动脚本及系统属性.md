@@ -179,6 +179,12 @@ on property:persist.mtklog.enable=0
 
 # 2、系统属性
 
+
+
+bionic/libc/system_properties/system_properties.cpp
+
+
+
 ## 2.1 设置/获取系统属性的方法
 
 * JAVA android.os包Systemproperties类的set/get方法
@@ -202,18 +208,37 @@ property_set/get 其实是对bionic C库中__system_property_set/get的封装
 
 * libc.so   bionic
 
+  源码实现：bionic/libc/system_properties/system_properties.cpp
+
+  
+
   #include <sys/system_properties.h>
-
+  
   PROP_VALUE_MAX 
-
+  
   PROP_NAME_MAX
+  
+  
  ```
 int __system_property_set(const char* key, const char* value)
+底层通过unix套接字向init进程发送数据，init进程把key value写入共享内存，其他进程只有该共享内存页面的可读权限。
+成功返回0，失败返回-1 ，key和value中的字符串需要以'\0'结尾
+
+
+
 int __system_property_get(const char* key, char* value)
-底层通过unix套接字向init进程发送数据
+由于所有进程从init fork而来，因此本进程中就有保存key value的共享内存页，所有进程的虚拟共享内存页对应同一个物理内存页，因此可以直接从本进程的虚拟共享内存页里面拿到init进程写入的key value，在虚拟共享内存页内，如果没有找到key返回0，并且把value[0]='\0'
+如果能找到key则返回key对应value的长度(不包括'\0',记作ret)，并且往value里面填充value字符串，最后在字符串的最后面添加'\0',即value[ret]='\0'，__system_property_get返回的是ret，但其实value中操作的字节长度是ret+1,最后一个字节始终是'\0'，此外key需要以'\0'结尾
  ```
 
+可以调\_\_system_property_set后马上调\_\_system_property_get，这是个阻塞的接口，只有init进程写入共享内存页面完成后调用\_\_system_property_set的进程才返回。
+
+
+
+
+
 * shell 
+
 ```
 setprop  
 getprop
