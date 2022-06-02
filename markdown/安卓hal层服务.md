@@ -2644,7 +2644,25 @@ const auto& ret_pair = (obj->*work)(std::forward<Args>(args)...); 相当于调�
 
 ### 11. 类型映射
 
+https://source.android.google.cn/devices/architecture/hidl-java/types
+
+https://source.android.google.cn/devices/architecture/hidl-cpp/types
+
 https://blog.csdn.net/shift_wwx/article/details/86531179
 
 ![image-20220118202934046](安卓hal层服务.assets/image-20220118202934046.png)
 
+
+
+
+
+
+
+```
+hidl   ->   java   基本数据类型转换
+
+uint8_t uint16_t  uint32_t uint64_t      ->    byte short int long   (未进行强制转换)
+int8_t int16_t  int32_t int64_t          ->    byte short int long
+float                                    ->    float
+double                                   ->    double
+```

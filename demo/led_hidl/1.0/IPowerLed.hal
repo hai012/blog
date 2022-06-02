@@ -1,0 +1,6 @@
+package android.hardware.led@1.0;
+
+interface IPowerLed {
+	readState(int32_t which) generates (bool success, bool state);
+	writeState(int32_t which, bool state) generates (bool success);
+};

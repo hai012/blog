@@ -1,0 +1,76 @@
+#define ROOT_NODE &odm
+
+/ {
+......
+	odm: odm {
+		compatible = "simple-bus";
+		/* reserved for overlay by odm */
+	};
+......
+};
+
+
+ROOT_NODE {
+......
+	ledpower: led_power {
+		compatible = "zte,gpio_led";
+		pinctrl-names = "default";
+		pinctrl-0 = <&led_power_pin>;
+		led_gpio_group-gpios = <&pio 15 GPIO_ACTIVE_LOW>;
+	};
+	
+	keytest: key_test {
+		compatible = "zte,gpio_key";
+		pinctrl-names = "default";
+		pinctrl-0 = <&key_pin>;
+		keytest-gpios = <&pio 110 GPIO_ACTIVE_LOW>;
+		interrupt-parent = <&pio>;
+		interrupts = <110 IRQ_TYPE_EDGE_RISING>;
+	};
+......
+};
+
+
+&gpio_key {
+	volinc_key{
+		debounce-interval = <100>;
+		gpios = <&pio 106 1>;
+		linux,code = <115>;
+		linux,input-type = <1>;
+	};
+};
+
+
+&pio {
+
+	pinctrl-names = "default";
+......
+	led_power_pin: led_pin_gpio {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO15__FUNC_GPIO15>;
+			bias-disable;
+			input-disable;
+			input-schmitt-disable;
+			drive-open-drain;
+			output-enable;
+			output-high;
+		};
+	};
+
+	key_pin: key_pin_gpio {
+		pins_cmd_dat {
+			pinmux = <PINMUX_GPIO110__FUNC_GPIO110>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
+			input-enable;
+			input-schmitt-enable;
+			output-disable;
+		};
+	};
+......
+};
+
+
+
+&ledpower {
+	status = "okay";
+};

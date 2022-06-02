@@ -1,0 +1,4 @@
+service ledtest android.hardware.led@1.0-service-service
+    class hal
+    user  system
+    group system

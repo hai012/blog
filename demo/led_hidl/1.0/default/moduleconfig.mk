@@ -1,0 +1,3 @@
+$(eval LOCAL_MK_PATH := $(lastword $(MAKEFILE_LIST)))
+$(eval FRAMEWORK_MANIFEST_FILE += $(dir $(LOCAL_MK_PATH))manifest.xml)
+$(warning FRAMEWORK_MANIFEST_FILE = $(DEVICE_MANIFEST_FILE))

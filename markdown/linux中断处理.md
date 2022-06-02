@@ -2,41 +2,59 @@
 
 ### 1.源码跟踪
 
+![image-20220523205206134](linux中断处理.assets/image-20220523205206134.png)
+
+
+
 #### 1.1中断上半部
 
+ARM64 SMP系统的CPU进入中断后硬件会自动关闭当前CPU的所有中断，之后再跳转到异常向量表
 
-
-SMP系统的CPU进入中断后硬件会自动关闭当前CPU的所有中断，之后再跳转到异常向量表
-
-![image-20220224210352078](linux中断处理.assets/image-20220224210352078.png)
-
-接着跳转到vector_rst向量表，判断当前发生中断时处于内核态还是用户态如果是内核态跳转到\_\_irq_svc执行，如果是用户态跳转到 \_\_irq_user执行。
-
-![image-20220224210428904](linux中断处理.assets/image-20220224210428904.png)
-
-\_\_irq_svc 和 \_\_irq_user 的区别在于保存现场的方式不同，保存完现场后都执行irq_handler。
+![image-20220525173917989](linux中断处理.assets/image-20220525173917989.png)
 
 
 
-![image-20220224204522049](linux中断处理.assets/image-20220224204522049.png)
+
+
+如果CPU强制跳转到vectors向量表之前是在用户态则是el0,内核态未el1。
+
+中断lable是irq，硬件故障异常或系统调用自陷的lable是sync
 
 
 
-irq_hander最终调用handle_arch_irq函数指针。
+kernel_ventry宏最终跳转到相关elx_lable去执行。
+
+![image-20220525173613714](linux中断处理.assets/image-20220525173613714.png)
 
 
 
-handle_arch_irq函数指针在gic驱动程序的probe函数中通过调用
+el0_irq保存线程后执行irq_handler这个宏里面定义的代码块，执行完毕后进入ret_to_user后续进行线程调度
 
-```
-set_handle_irq(gic_handle_irq);
-```
+![image-20220525174100188](linux中断处理.assets/image-20220525174100188.png)
+
+el1_irq保存线程后也执行irq_handler这个宏里面定义的代码块，执行完毕后进入el1_preempt后续进行线程调度
+
+![image-20220525174210982](linux中断处理.assets/image-20220525174210982.png)
+
+任务调度参考https://zhuanlan.zhihu.com/p/483899721
+
+再来看irq_hander如何处理，irq_hander中最终调用handle_arch_irq函数指针。
+
+![image-20220525174258873](linux中断处理.assets/image-20220525174258873.png)
+
+
+
+
+
+如果使用gic,内核启动时在gic驱动程序的probe函数中通过调用set_handle_irq(gic_handle_irq)来将handle_arch_irq函数指针指向gic_handle_irq函数
+
+​                                                      rk3569_r/kernel/kernel/irq/handle.c
 
 ![image-20220225141235222](linux中断处理.assets/image-20220225141235222.png)
 
 
 
-将其指向了gic_handle_irq函数。gic驱动程序还定义了一系列gic处理函数并将其放到gic中断控制器的irq_domain结构体中。
+gic驱动程序还定义了一系列gic处理函数并将其放到gic中断控制器的irq_domain结构体中。
 
 
 
@@ -137,7 +155,7 @@ GPIO控制器的分发函数负责读取GPIO控制器的寄存器确定GPIO中�
 
 handle_edge_irq函数和handle_level_irq函数**不同点：**
 
-**二者最大的不同在于对中断线屏蔽的处理以及对handle_irq_event函数的调用次数。handle_edge_irq调用handle_irq_event函数时irq_desc结构体节点对应的该中断线处于未屏蔽状态，在一个do while循环中不断调handle_irq_event函数，只要中断线被屏蔽未屏蔽且irq_desc结构体节点未处于IRQS_PENDING状态(处于该状态意味着在处理中断时该中断又发生了一次)就一直调。而handle_level_irq在调用handle_irq_event之前就已经调用了mask_ack_irq()函数屏蔽了中断线，只调一次handle_irq_event，且调完了再调cond_unmask_irq来开启中断线。**
+**二者最大的不同在于对中断线屏蔽的处理以及对handle_irq_event函数的调用次数。handle_edge_irq调用handle_irq_event函数时irq_desc结构体节点对应的该中断线处于未屏蔽状态，在一个do while循环中不断调handle_irq_event函数，只要中断线被屏蔽未屏蔽且irq_desc结构体节点处于IRQS_PENDING状态(处于该状态意味着在处理中断时该中断又发生了一次)就一直调。而handle_level_irq在调用handle_irq_event之前就已经调用了mask_ack_irq()函数屏蔽了中断线，只调一次handle_irq_event，且调完了再调cond_unmask_irq来开启中断线。**
 
 
 
@@ -185,23 +203,39 @@ irq_may_run根据当前irq_desc结构体节点中的istate是否有IRQD_IRQ_INPR
 
 
 
-\__ARCH_IRQ_EXIT_IRQS_DISABLED宏在arm和arm64中都被定义成了1，不需要再次关当前CPU中断。接着调用preempt_count_sub(HARDIRQ_OFFSET)让preemt_count--，然后调用in_interrupt根据preemt_count判断一下是否有软件中断被硬件中断打断，以及是否有软件中断要处理。如果没有软件中断被打断且有软件中断要处理，则调用invoke_softirq来处理软件中断。invoke_softirq调用__do_softirq来处理。
+\__ARCH_IRQ_EXIT_IRQS_DISABLED宏在arm和arm64中都被定义成了1，不需要再次关当前CPU中断。接着调用preempt_count_sub(HARDIRQ_OFFSET)让preemt_count--，然后调用in_interrupt根据preemt_count判断一下是否有软件中断被硬件中断打断，以及是否有软件中断要处理。如果没有软件中断被打断且有软件中断要处理，则调用invoke_softirq来处理软件中断。
 
-![image-20220225100922770](linux中断处理.assets/image-20220225100922770.png)
 
-\_\_do_softirq调用\_\_local_bh_disable_ip(\_RET_IP_, SOFTIRQ_OFFSET)让preempt_count++，然后调用local_irq_enable();开启当前CPU的中断，接着去while循环处理软件中断，处理完了再调用local_irq_disable();关当前CPU的中断，接着再调用\_\_local_bh_enable(SOFTIRQ_OFFSET);让preempt_count--。
+
+invoke_softirq参考https://zhuanlan.zhihu.com/p/145908094
+
+MTK、rk、amlogic、qcom平台的内核都定义了CONFIG_IRQ_FORCED_THREADING=y，导致force_irqthreads==true，实际上invoke_softirq里面主要是判断ksoftirqd内核线程是否已经在运行，如果已经运行则直接返回，否则wakeup ksoftirqd内核线程再返回。这种情况下软件中断在线程栈中执行。
+
+![image-20220525170608919](linux中断处理.assets/image-20220525170608919.png)
+
+
+
+如果未定义CONFIG_IRQ_FORCED_THREADING，例如早期版本的内核则在invoke_softirq中调用\_\_do_softirq，这种情况下软件中断在中断栈里执行。\_\_do_softirq调用\_\_local_bh_disable_ip(\_RET_IP_, SOFTIRQ_OFFSET)让preempt_count++，然后调用local_irq_enable();开启当前CPU的中断，接着去while循环处理软件中断，处理完了再调用local_irq_disable();关当前CPU的中断，接着再调用\_\_local_bh_enable(SOFTIRQ_OFFSET);让preempt_count--。
 
 ![image-20220225101215451](linux中断处理.assets/image-20220225101215451.png)
 
 
 
 
+
+
+
+
+
 ### 2.中断处理模型
-整个中断处理模型如下：
 
 
+
+**如果softirq被线程化，则并未执行下图的第5~9步，到第四步后如果是N则只是唤醒ksoftirqd内核线程去处理softirq，处理中断的当前CPU全程处于关所有中断状态。**softirq未被线程化的中断处理模型如下：
 
 ![image-20220225103409770](linux中断处理.assets/image-20220225103409770.png)
+
+
 
 a. 硬件中断A处理过程中，没有其他中断发生：
 
@@ -264,12 +298,9 @@ CPU又从①开始再次执行中断B的上半部代码：
 
 
 
-
-![image-20220225105516163](linux中断处理.assets/image-20220225105516163.png)
-
+doc_and_source_for_drivers\IMX6ULL\doc_pic\08_Interrupt\04_Linux中断系统中的重要数据结构.tif
 
 
-![image-20220225105653774](linux中断处理.assets/image-20220225105653774.png)
 
 
 
@@ -309,23 +340,88 @@ request_threaded_irq
 
 ### 4.软件中断之softirq与tasklet
 
-tasklet使用softirq来实现，都是注册中断下半部的软件中断具体的处理函数。
+https://zhuanlan.zhihu.com/p/145908094
 
-一般不直接用softirq的API，直接使用tasklet：
 
-tasklet_init  
 
-tasklet_schedule  
+
+
+https://www.ktanx.com/blog/p/2456
+
+安卓平台定义了CONFIG_IRQ_FORCED_THREADING 宏，如今所有的softirq都在ksoftirqd内核线程的栈中运行。
+
+
+
+
+
+**softirq**
+
+softirq在2.3版本内核被引入，相关代码在中定义，内核中直接使用softirq的场景较少。
+
+可用的softirq有以下几种：
+
+```text
+enum
+{
+HI_SOFTIRQ=0,
+TIMER_SOFTIRQ,
+NET_TX_SOFTIRQ,
+NET_RX_SOFTIRQ,
+BLOCK_SOFTIRQ,
+BLOCK_IOPOLL_SOFTIRQ,
+TASKLET_SOFTIRQ,
+SCHED_SOFTIRQ,
+HRTIMER_SOFTIRQ,
+RCU_SOFTIRQ, /* Preferable RCU should always be the last softirq */
+NR_SOFTIRQS
+};
+```
+
+提交一个softirq需要调用raise_softirq函数，raise_softirq调用raise_softirq_irqoff，该函数将相应软中断标识为pending、完成软中断提交。
+
+**标识为pending的软中断可在以下时机得到处理**：
+
+1. 对于非线程化的softirq, 硬中断处理完成、在irq_exit中调用到invoke_softirq函数调用\_\_do_softirq。在__do_softirq函数中调用softirq数组里面已经pending项的处理函数。
+
+2. ksoftirqd内核线程被唤醒后处理
+
+3. 显式地在线程上下文调用do_softirq进行软中断处理，例如在内核网络代码中，netif_rx_ni函数会主动调用do_softirq进行软中断理
+
+
+
+
+
+**tasklet**
+
+tasklet基于softirq实现，其本质也是softirq，对应softirq枚举类型中的HI_SOFTIRQ和TASKLET_SOFTIRQ，HI_SOFTIRQ优先级较高。
+
+相比softirq，即使相同类型的softirq也可同时在不同的cpu上处理，而相同类型的tasklet不可同时在不同cpu上处理，不同类型的tasklet可以。
+
+可通过tasklet_schedule或tasklet_hi_schedule提交tasklet，这两个函数最终调用raise_softirq_irqoff提交软中断。
+
+因tasklet提交的同样是软中断，所以还是由do_softirq函数完成tasklet的处理。
+
+tasklet_init
+
+tasklet_schedule
 
 具体用法参考《linux设备驱动开发  马厄迪 pdf》156页。
 
-### 5.工作队列kworker
+
+
+
+
+
+
+
+
+### 5.工作队列及kworker内核线程
 
 创建结构体，填充数据，并将该结构体交给kworker内核线程来处理。
 
 DECLARE_WORK
 
-INIT_WORK  
+INIT_WORK
 
 schedule_work
 
@@ -410,7 +506,7 @@ void handler_func(struct delayed_work *work) {
 ##### 5.2.1 定义与初始化
 
 定义与初始化分开
-struct delayed_work work;//声明一个队列
+struct delayed_work work;//声明一个队列,struct delayed_work中包含有一个一般工作队列使用的struct work_struct
 INIT_DELAYED_WORK(&work, handler_func);//初始化这个队列
 
 //定义与初始化合二为一
@@ -443,9 +539,133 @@ schedule_delayed_work其实就是queue_delayed_work函数的一个封装:  ${KER
 
 
 
-### 6.中断线程化
+### 6.使用独立的线程化中断
 
 以前用work来线程化地处理中断，一个worker线程只能由一个CPU执行，多个中断的work都由同一个worker线程来处理，在单CPU系统中也只能忍着了。但是在SMP系统中，明明有那么多CPU空着，你偏偏让多个中断挤在这个CPU上？新技术threaded irq，为每一个中断都创建一个内核线程；多个中断的内核线程可以分配到多个CPU上执行，这提高了效率。
 
 request_threaded_irq
+
+
+
+
+
+
+
+
+
+### 7.中断相关函数
+
+
+
+desc->irq_data.chip->irq_enable/irq_disable              是否使能中断线
+
+disable时中断控制器根本就不响应该irq
+
+
+
+desc->irq_data.chip->irq_mask/irq_unmask               是否屏蔽某个中断线
+
+mask时，子中断控制器或gic接收该irq，只是不往上级传递，这时，该irq处于pending状态
+
+
+
+desc->irq_data.chip->irq_ack                                         清除某个中断线的中断标志位。gic向CPU发出中断后，只有在某个CPU调用irq_ack清除gic寄存器相关bit位后，如果该中断线再次到达，gic才会继续发出中断请求。如果是子中断控制器例如GPIO控制器就清除GPIO控制器中的一些标志位，如果是gic中断控制器清除gic中断控制器中的一些标志位
+
+
+
+desc->irq_data.chip->irq_mask_ack                              irq_mask+irq_ack 
+
+
+
+
+
+local_irq_disable/local_irq_enable                                是否屏蔽当前CPU的所有IRQ中断，通过设置CPU CPSR的第I位来实现
+
+
+
+
+
+enable_irq    最终调用desc->irq_data.chip->irq_enable或desc->irq_data.chip->irq_unmask来实现
+
+disable_irq   最终调用desc->irq_data.chip->irq_disable或desc->irq_data.chip->irq_mask来实现
+
+enable_irq和disable_irq调用次数是相关的，调了多少次enable_irq就要调用相应次数的disable_irq才调到其最终实现，反之亦然，调用次数使用desc->depth来记录。enable_irq/disable_irq可以让某个中断线对所有CPU有效/失效。
+
+
+
+
+
+
+
+CPU被中断打断跳转到中断向量时自动CPU CPSR的第I位置为1，表明屏蔽当前CPU的所有IRQ中断
+
+
+
+
+
+CPU    CPSR[I] ==1
+
+preempt_count++                   irq_enter
+
+​                                                   desc->handle_irq指向 handle_edge_irq 这个通用分发函数
+
+
+
+
+
+
+
+对于所有中断线与单个CPU，当前处理中断的CPU缺省CPSR的第I位置为1处于屏蔽当前CPU的所有IRQ中断状态，在softirq未被线程化时会在处理softirq之前调用local_irq_enable清除这个屏蔽位，softirq执行完毕又会调用local_irq_disable置位该屏蔽位。
+
+
+
+对于单个中断线与所有CPU，如果该中断是水平触发，处理该中断线的CPUx在handle_level_irq中调用mask_ack_irq，屏蔽该中断线后清除该中断线的标志位，其他所有CPU无法再收到该中断，CPUx执行中断下半部前判断如果没有IRQF_ONESHOT标志则调用unmask_irq，否则不调用unmask_irq待后续中断线程完成后再调用，在mask_ack_irq与unmask_irq之间该中断线被屏蔽，即使再次发生也不会有任何CPU去处理该中断。如果该中断是边沿触发，不同的CPU在执行handle_edge_irq期间具有不同的操作：
+
+* 对于处理该中断中断的CPUx:    CPUx执行handle_edge_irq时调用irq_ack清除中断标志位(此时未屏蔽中断线，清除ack后即使处理该中断线的CPUx未中断返回，如果再次发生该中断，gic中断控制器可以将后续的中断请求发送给其他CPUy去处理)。然后判断该IRQ是否有 IRQS_PENDING 标志 如果有则对该中断线unmask_irq。接着调用 handle_irq_event 去处理中断，在 handle_irq_event 中清除IRQS_PENDING标志后再调用handle_irq_event_percpu。handle_irq_event调完后do-while判断是否还有IRQS_PENDING标志，如果有则继续循环调用handle_irq_event。
+
+* 如果CPUx还在处理，此时又有该中断发生，中断请求被发送到其他CPUy上，CPUy上执行handle_edge_irq时设置IRQS_PENDING标志，对该中断线mask_ack_irq(CPUy在这里mask后直到CPUx执行到unmask_irq期间该中断后续如果再发生gic也不会把请求传递到任何CPU了)，然后之间中断返回。
+
+简单来说对于边缘触发，当处理上一个事件的CPU未处理完成退出中断而此时又发生中断在另一个CPU上同时处理时，如果是第一次发生则在循环中不断调用 handle_irq_event 去处理中断，循环次数小于边沿触发事件发生的次数(因为如果第二次发生后会mask该中断线，如果未及时处理会丢失事件)。第二次发生后则并未真正去处理而是mask该中断设置相关标志让正在处理第一次中断的CPU多循环一次。
+
+
+
+
+
+对于线程化的softirq，CPU中断里面没有中断下半部。
+
+
+
+边沿/水平触发决定中断什么时候发生以及发生时是否
+
+
+
+
+
+使用独立中断线程的中断，request_threaded_irq注册的中断上半部具体处理函数fn()永远某一时刻只有一个CPU去执行，此时该CPU处于关中断状态(对其他类型的irq也是如此)。而对于该中断线，如果是水平触发则在执行fn()之前被屏蔽，执行完fn()之后可能会umask也可能会等到中断返回在独立线程中处理完thread_fn后再umask，
+
+
+
+
+
+有 IRQD_IRQ_INPROGRESS，已经在处理，irq_may_run=true
+
+无 IRQD_IRQ_INPROGRESS，未处理，irq_may_run=false
+
+
+
+
+
+request_threaded_irq时如果上半部处理函数为空，thread_fn不为空则需要带有IRQF_ONESHOT标志。
+
+IRQF_ONESHOT仅在水平触发方式里面用于执行完中断上半部后不umask该中断源，以免中断退出后一直触发中断。
+
+内核在中断上下文执行中断上半部后唤醒独立内核线程去处理thread_fn，然后退出中断处理转去进行线程调度，并非在中断上下文唤醒一次独立内核线程就执行一次，如此一一对应交错运行，内核可以在中断上下文多次唤醒独立内核线程，独立线程对于每次的唤醒请求都执行一次thread_fn，并没有强制要求中断上下文唤醒与独立内核线程调用thread_fn交错运行。当然指定了IRQF_ONESHOT的水平触发方式确实一定交错运行。而边沿触发是否交错运行完全是一个随机事件。
+
+thread_fn在独立内核线程中执行天生就某一时刻只能有一个CPU去运行。
+
+独立内核线程执行完thread_fn后会判断当前irq是否处于mask状态，如果是则将其umask。(IRQF_ONESHOT+水平触发方式时会执行到umask，而边沿触发不会执行到umask)。
+
+IRQF_ONESHOT可以参考
+
+https://blog.csdn.net/melo_fang/article/details/78224326
 

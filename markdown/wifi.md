@@ -660,7 +660,7 @@ public class BaseWifiService extends IWifiManager.Stub {
 687      public void stopReconnectAndScan(int index, int period) {
 688          throw new UnsupportedOperationException();
 689      }
-690  
+690
 }
  
 
@@ -1400,6 +1400,34 @@ struct wpa_global     *global;
 static struct eap_method *eap_methods;
 external/wpa_supplicant_8/src/eap_peer/eap_methods.c
 ```
+
+
+
+相关数据结构
+
+struct wpa_supplicant   a
+
+struct wpa_ssid               b
+struct eap_peer_config  c
+
+
+struct eap_sm                 d
+
+
+struct eapol_sm              e
+
+
+
+a->current_ssid  = b
+b.eap = c
+
+d->eapol_ctx = e
+e->config = c
+
+
+d->last_config = c
+
+
 
 
 
@@ -3976,11 +4004,11 @@ external/wpa_supplicant_8/wpa_supplicant/events.c
 
 
 
-_wpa_supplicant_event_scan_results调到了wpas_select_network_from_last_scan函数，回到起点，wpa_supplicant_fast_associate最终也调到了wpas_select_network_from_last_scan函数，看来该函数专门负责去连接AP
+**_wpa_supplicant_event_scan_results调到了wpas_select_network_from_last_scan函数，回到起点，wpa_supplicant_fast_associate最终也调到了wpas_select_network_from_last_scan函数，看来该函数专门负责去连接AP**
 
 
 
-
+##### wpas_select_network_from_last_scan
 
 external/wpa_supplicant_8/wpa_supplicant/events.c
 
@@ -4700,7 +4728,11 @@ external/wpa_supplicant_8/src/common/defs.h
 
 
 
-![image-20220513140952525](wifi.assets/image-20220513140952525.png)
+##### eapol_sm_step
+
+![image-20220527172425960](wifi.assets/image-20220527172425960.png)
+
+
 
 
 
@@ -4714,29 +4746,143 @@ external/wpa_supplicant_8/src/common/defs.h
 
 
 
-#### 6.3. wpa-enterprise EAPOL-EAP-PEAP_90-GTC-TLV认证流程
-
-struct wpa_supplicant   a
-
-struct wpa_ssid               b
-struct eap_peer_config  c
 
 
-struct eap_sm                 d
+eapol_sm_step的最后非常关键，如果eapol_sm->cb_status不为EAPOL_CB_IN_PROGRESS时本次wifi连接时eapol处理完毕，接着去调用:
+
+```
+sm->ctx->cb(sm, result, sm->ctx->cb_ctx);
+```
+
+当SUPP_PAE状态机切换到HELD或者AUTHENTICATED状态时都会调用给cb_status赋值让它不为EAPOL_CB_IN_PROGRESS
+
+![image-20220527173433350](wifi.assets/image-20220527173433350.png)
+
+来看以下SUPP_PAE状态机什么时候切换到该状态：
+
+![image-20220527174130587](wifi.assets/image-20220527174130587.png)
 
 
-struct eapol_sm              e
+
+来看下SUPP_PAE状态机在AUTHENTICATING状态时什么时候sm->suppFail = true;
+
+![image-20220527174918259](wifi.assets/image-20220527174918259.png)
 
 
 
-a->current_ssid  = b
-b.eap = c
+来看下 SUPP_BE 状态机什么时候处于FAIL状态：
 
-d->eapol_ctx = e
-e->config = c
+![image-20220527175126418](wifi.assets/image-20220527175126418.png)
+
+来看下 eapFail在哪里设置的：
+
+![image-20220527175241767](wifi.assets/image-20220527175241767.png)
+
+对应代码:
+
+![image-20220527175412366](wifi.assets/image-20220527175412366.png)
 
 
-d->last_config = c
+
+因此，一旦EAP状态机进入FAILURE状态，eapFail=true，导致 SUPP_BE 状态机切换到FAIL状态。 SUPP_BE 状态机进入FAIL状态时执行suppFail = true操作，导致SUPP_PAE状态机处于HELD状态，SUPP_PAE状态机进入HELD状态时给cb_status赋值让它不为EAPOL_CB_IN_PROGRESS，最终导致在eapol_sm_step函数完成状态机切换循环后执行sm->ctx->cb(sm, result, sm->ctx->cb_ctx);函数指针，该函数指针在addInterface调用wpa_supplicant_init_eapol函数时被赋值，指向了wpa_supplicant_eapol_cb函数：
+
+![image-20220530093516843](wifi.assets/image-20220530093516843.png)
+
+
+
+![image-20220530093648217](wifi.assets/image-20220530093648217.png)
+
+wpa_supplicant_eapol_cb函数如下：
+
+![image-20220530094544557](wifi.assets/image-20220530094544557.png)
+
+对于失败的情况wpa_supplicant_eapol_cb中调用wpa_supplicant_req_auth_timeout ，在wpa_supplicant_req_auth_timeout 中往epoll中注册超时函数。
+
+![image-20220530094628052](wifi.assets/image-20220530094628052.png)
+
+当fd处理完成返回epoll循环后调用到wpa_supplicant_timeout函数：
+
+
+
+##### wpa_supplicant_rx_eapol
+
+在addInterface时创建了PF_PACKET类型的套接字，然后给该套接字注册接收处理函数wpa_supplicant_rx_eapol。在完成关联后收到的EAPOL数据包由该函数来处理：
+
+![image-20220530110431364](wifi.assets/image-20220530110431364.png)
+
+
+
+对于PSK,EAP这些key_mgmt，wpa_supplicant_rx_eapol中调用eapol_sm_rx_eapol来处理：
+
+![image-20220530105655986](wifi.assets/image-20220530105655986.png)
+
+wpa_supplicant_rx_eapol根据EAPOL数据包类型(key 或 eap)最终又调用eapol_sm_step来处理。
+
+
+
+##### 6.3. wpa-enterprise EAPOL-EAP-PEAP_90-GTC-TLV认证流程
+
+
+
+![image-20220530143428727](wifi.assets/image-20220530143428727.png)
+
+
+
+![image-20220530143623564](wifi.assets/image-20220530143623564.png)
+
+
+
+
+
+![image-20220530143522035](wifi.assets/image-20220530143522035.png)
+
+
+
+![image-20220530143911172](wifi.assets/image-20220530143911172.png)
+
+
+
+peap内存认证处理：
+
+```
+928  static int eap_peap_phase2_request(struct eap_sm *sm,
+929  				   struct eap_peap_data *data,
+930  				   struct eap_method_ret *ret,
+931  				   struct wpabuf *req,
+932  				   struct wpabuf **resp)
+933  {
+...
+949  	switch (*pos) {
+950  	case EAP_TYPE_IDENTITY://传输identity
+951  		*resp = eap_sm_buildIdentity(sm, hdr->identifier, 1);
+952  		break;
+953  	case EAP_TYPE_GTC://传输password
+...
+1020          break;
+1021  	case EAP_TYPE_TLV://传输认证结果
+1022  		os_memset(&iret, 0, sizeof(iret));
+1023  		if (eap_tlv_process_ex(sm, data, &iret, req, resp,
+1024  				    data->phase2_eap_started &&
+1025  				    !data->phase2_eap_success)) {
+1026  			ret->methodState = METHOD_DONE;
+1027  			ret->decision = DECISION_FAIL;
+1028  			return -1;
+1029  		}
+1030  		if (iret.methodState == METHOD_DONE ||
+1031  		    iret.methodState == METHOD_MAY_CONT) {
+1032  			ret->methodState = iret.methodState;
+1033  			ret->decision = iret.decision;
+1034  			data->phase2_success = 1;
+1035  		}
+1036  		break;
+...
+1037  	case EAP_TYPE_EXPANDED:
+....
+1155  	return 0;
+1156  }
+```
+
+
 
 
 
@@ -4858,6 +5004,14 @@ https://blog.csdn.net/ly131420/article/details/38400583
 
 ## 10 wifi驱动(rk平台)
 
+
+
+![捕获](wifi.assets/捕获.PNG)
+
+
+
+
+
 device_add
 
 ```
@@ -4923,7 +5077,7 @@ kernel/arch/arm64/boot/dts/rockchip/rk3568.dtsi
 2122 	sdmmc2: dwmmc@fe000000 {
 2123 		compatible = "rockchip,rk3568-dw-mshc",
 2124 			     "rockchip,rk3288-dw-mshc";
-2125 		reg = <0x0 0xfe000000 0x0 0x4000>;
+2125 		reg = <0x0 0xfe000000.msdc 0x0 0x4000>;
 2126 		interrupts = <GIC_SPI 100 IRQ_TYPE_LEVEL_HIGH>;
 2127 		max-frequency = <150000000>;
 2128 		clocks = <&cru HCLK_SDMMC2>, <&cru CLK_SDMMC2>,
@@ -4938,7 +5092,7 @@ kernel/arch/arm64/boot/dts/rockchip/rk3568.dtsi
 2420 	sdmmc0: dwmmc@fe2b0000 {
 2421 		compatible = "rockchip,rk3568-dw-mshc",
 2422 			     "rockchip,rk3288-dw-mshc";
-2423 		reg = <0x0 0xfe2b0000 0x0 0x4000>;
+2423 		reg = <0x0 0xfe2b0000.msdc 0x0 0x4000>;
 2424 		interrupts = <GIC_SPI 98 IRQ_TYPE_LEVEL_HIGH>;
 2425 		max-frequency = <150000000>;
 2426 		clocks = <&cru HCLK_SDMMC0>, <&cru CLK_SDMMC0>,
@@ -4953,7 +5107,7 @@ kernel/arch/arm64/boot/dts/rockchip/rk3568.dtsi
 2435 	sdmmc1: dwmmc@fe2c0000 {
 2436 		compatible = "rockchip,rk3568-dw-mshc",
 2437 			     "rockchip,rk3288-dw-mshc";
-2438 		reg = <0x0 0xfe2c0000 0x0 0x4000>;
+2438 		reg = <0x0 0xfe2c0000.msdc 0x0 0x4000>;
 2439 		interrupts = <GIC_SPI 99 IRQ_TYPE_LEVEL_HIGH>;
 2440 		max-frequency = <150000000>;
 2441 		clocks = <&cru HCLK_SDMMC1>, <&cru CLK_SDMMC1>,
@@ -4968,11 +5122,11 @@ kernel/arch/arm64/boot/dts/rockchip/rk3568.dtsi
 
 设备树被解析后生成三个平台设备，对应
 
-/sys/devices/platform/fe000000
+/sys/devices/platform/fe000000.msdc
 
-/sys/devices/platform/fe2b0000
+/sys/devices/platform/fe2b0000.msdc
 
-/sys/devices/platform/fe2c0000
+/sys/devices/platform/fe2c0000.msdc
 
 三个平台设备compatible有一项为"rockchip,rk3288-dw-mshc"，与如下驱动匹配(调三次probe，每次调用时传入的struct platform_device *pdev指向不同的平台设备)：
 
@@ -5111,7 +5265,7 @@ mmc_alloc_host函数关键部分在
 
 dev和class_dev是struct device结构体
 
-**dev是前面dw_mmc-rockchip驱动匹配的那个平台设备的dev(即pdev->dev)，该设备由与驱动compatible匹配的设备树节点解析生成，在/sys/devices下对应节点/sys/devices/platform/fe2c0000，在/sys/class下没有对应节点，在/sys/bus下对应节点 /sys/bus/platform/devices/fe2c0000。**
+**dev是前面dw_mmc-rockchip驱动匹配的那个平台设备的dev(即pdev->dev)，该设备由与驱动compatible匹配的设备树节点解析生成，在/sys/devices下对应节点/sys/devices/platform/fe2c0000.msdc，在/sys/class下没有对应节点，在/sys/bus下对应节点 /sys/bus/platform/devices/fe2c0000.msdc。**
 
 mmc_host_class定义在kernel/drivers/mmc/core/host.c：
 
@@ -5119,7 +5273,7 @@ mmc_host_class定义在kernel/drivers/mmc/core/host.c：
 
 
 
-**返回到dw_mci_init_slot函数中，后续调用在mmc_add_host函数，在mmc_add_host函数中调用device_add函数时就会在/sys/devices/platform/fe2c0000/下创建${class_dev.name}节点，对应dev的子设备。此外还会在/sys/class/下创建${mmc_host_class.name}节点。且没有在/sys/bus下创建节点，因为class_dev.bus没有指定。**
+**返回到dw_mci_init_slot函数中，后续调用在mmc_add_host函数，在mmc_add_host函数中调用device_add函数时就会在/sys/devices/platform/fe2c0000.msdc/下创建${class_dev.name}节点，对应dev的子设备。此外还会在/sys/class/下创建${mmc_host_class.name}节点。且没有在/sys/bus下创建节点，因为class_dev.bus没有指定。**
 
 
 
@@ -5324,7 +5478,7 @@ sdio_read_func_cis负责读卡并初始化func->vendor和func->device
 
 **mmc_add_card(host->card);**
 
-让前面指定的父设备、总线生效，即在/sys/devices/platform/fe2c0000/mmc_host/下创建对应card节点
+让前面指定的父设备、总线生效，即在/sys/devices/platform/fe2c0000.msdc/mmc_host/下创建对应card节点
 
 /rk3569_r/kernel/drivers/mmc/core/bus.c
 
