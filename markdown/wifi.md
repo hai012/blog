@@ -975,7 +975,23 @@ interface ISupplicantStaIface extends ISupplicantIface
 
 
 
+iw
+
+iwconfig
+
+iwlist
+
+iwpriv
+
+
+
+
+
+
+
 wpa_cli -i wlan0 -p -g@android:wpa_wlan0 IFNAME=wlan0 status
+
+
 
 
 
@@ -1097,13 +1113,25 @@ setprop  wifi.interface  wlan0 指定默认套接字/网卡接口，在-i参数�
 #file /dev/socket/wpa_wlan0
 /dev/socket/wpa_wlan0: no such file or directory
 
-#wpa_supplicant -g@android:wpa_wlan0  
+#wpa_supplicant -g@android:wpa_wlan0 IFNAME=wlan0
 
 #file /dev/socket/wpa_wlan0
 /dev/socket/wpa_wlan0: socket
 
-#wpa_cli  -g@android:wpa_wlan0
+#wpa_cli  -g@android:wpa_wlan0 IFNAME=wlan0
 ```
+
+
+
+以下四个操作等效，都指定wlan0这个interface
+
+wpa_cli  -g@android:wpa_wlan0        IFNAME=wlan0   #通过全局控制套接字，并指定interface为wlan0
+
+wpa_cli  -p  /data/vendor/wifi/wpa/sockets  -i wlan0    #通过-p指定interface的套接字所在路径，-i指定interface的套接字名
+
+wpa_cli  -O /data/vendor/wifi/wpa/sockets  -i wlan0     #-O可以重写-p的配置。
+
+wpa_cli  -i wlan0                                                                    #使用默认路径/data/vendor/wifi/wpa/sockets
 
 
 
@@ -1154,11 +1182,11 @@ wpa_cli   -i wlan0  scan_result
 
 wpa_cli    -i wlan0 add_network  #在wlan0接口中添加网络编号,得到networkID  
 
-wpa_cli    -i wlan0 set_network  networkID  xxxxx  #wifi热点名ssid、key_mgmt加密方式wpa/psk认证等，相当于配置文件中network={ ssid=xxx   psk=xxx    key_mgnt=xxx  ...}字段
+wpa_cli    -i wlan0 set_network  \<networkID\>xxxxx  #wifi热点名ssid、key_mgmt加密方式wpa/psk认证等，相当于配置文件中network={ ssid=xxx   psk=xxx    key_mgnt=xxx  ...}字段
 
-wpa_cli    -i wlan0 select_network networkID  
+wpa_cli    -i wlan0 select_network \<networkID\>   #select_network 会把指定的networkid enable，把其他的networkid disalbe
 
-wpa_cli    -i wlan0 enable_network   enable_network  networkID  
+wpa_cli    -i wlan0 enable_network   \<networkID\>  #enable_network   会把指定的networkid enable
 
 busybox udhcpc  -i wlan0 -q   #使用hdcp协议让DNS服务器分配ip，dhclient -i wlan0 功能与其类似
 
@@ -1192,11 +1220,35 @@ ip route change
 
 
 
+https://blog.csdn.net/weixin_30682043/article/details/116870468
+
+**当wpa_supplicant触发定时扫描并获得扫描结果后，如果扫描结果中有某个已经enable的networkid对应的SSID，那么就会触发连接的流程。扫描过程可以通过指定当前需要连接的BSSID、信道等信息加快扫描过程，从而更快地获得扫描结果。**
 
 
 
+netsh wlan show interfaces
+
+wpa_cli -iwlan0  dump
+
+ wpa_cli -iwlan0   log_level
+
+wpa_cli -iwlan0  signal_poll
+
+wpa_cli -iwlan0  blacklist
+
+wpa_cli -iwlan0   status
+
+wpa_cli -iwlan0   scan
+
+wpa_cli -iwlan0  scan_result
+
+wpa_cli -iwlan0  bss <SSID/BSSID>
+
+wpa_cli -i wlan0 get_capability <eap/pairwise/group/key_mgmt/proto/auth_alg/channels/freq/modes>
 
 
+
+iw dev
 
 ```
 184  	struct wpa_interface *ifaces, *iface;
@@ -2870,7 +2922,7 @@ WifiThreadRunner.runWithScissors方法判断一下，BnWifiServiceImpl服务实�
 
 
 
-BlockingRunnable.postAndWait(Handler handler, long timeout)方法首先使用handler.post(this)向handler对应的handlerThread线程发送Message(callback=this)，其中this是指WifiThreadRunner这个Runnable对象，当handlerThread线程接收到MessageQueue后调用WifiThreadRunner这个Runnable对象重写的run()方法来处理消息：
+BlockingRunnable.postAndWait(Handler handler, long timeout)方法首先使用handler.post(this)向handler对应的handlerThread线程发送Message(callback=this)，其中this是指WifiThreadRunner这个Runnable对象，当handlerThread线程接收到MessageQueue后调用WifiThreadRunner这个Runnable对象重写的run()方法来处理消息：   0
 
 ![image-20220329211846026](wifi.assets/image-20220329211846026.png)
 
@@ -2988,6 +3040,12 @@ frameworks/opt/net/wifi/service/java/com/android/server/wifi/scanner/WificondSca
 WifiNative.scan调用WifiCondManager.startScan
 
 ![image-20220408180715801](wifi.assets/image-20220408180715801.png)
+
+
+
+***注意，MTK增加了对GBK编码的隐藏wifi名的支持，如果发现String类型SSID是中文，则除了将其转换成UTF-8编码的byte[]外，还将其转换成GBK编码的byte[]，然后再将这两个不同的byte[]放入hiddenNetworkSsidArrays变量中。***
+
+
 
 mWifiCondManager是WifiNl80211Manager 类型的对象，因此调用到了WifiNl80211Manager.startScan:
 
@@ -3168,6 +3226,10 @@ system/connectivity/wificond/scanning/scan_utils.cpp
 ​                                  system/connectivity/wificond/net/netlink_manager.cpp
 
 ![image-20220412201415008](wifi.assets/image-20220412201415008.png)
+
+
+
+![image-20220623142937134](wifi.assets/image-20220623142937134.png)
 
 
 
@@ -3421,6 +3483,8 @@ ServiceHandler.handleMessage首先调用getListenerWithExecutor从mListener这�
 
 ![image-20220413185021014](wifi.assets/image-20220413185021014.png)
 
+
+
 ![image-20220413185445502](wifi.assets/image-20220413185445502.png)
 
 
@@ -3517,7 +3581,7 @@ WifiManager.connect(int networkId, @Nullable ActionListener listener)
 
 connectInternal调用WifiServiceImpl.connect(WifiConfiguration config, int netId, IBinder binder,@Nullable IActionListener callback, int callbackIdentifier)
 
-
+ 
 
 
 
@@ -4334,8 +4398,45 @@ external/wpa_supplicant_8/wpa_supplicant/sme.c
 1649  void sme_associate(struct wpa_supplicant *wpa_s, enum wpas_mode mode,
 1650  		   const u8 *bssid, u16 auth_type)
 1651  {
-......  //填充关联所需的一些参数
-2008  	if (wpa_drv_associate(wpa_s, &params) < 0) {
+1652  	struct wpa_driver_associate_params params;
+1653  	struct ieee802_11_elems elems;
+......  
+1973  	wpa_supplicant_set_state(wpa_s, WPA_ASSOCIATING);
+1974  	//填充关联所需的一些参数，从params.wpa_ie解析需要关联的AP的ies信息元素到elems，这些信息将被填入assoc requst帧中
+1975  	if (params.wpa_ie == NULL ||
+1976  	    ieee802_11_parse_elems(params.wpa_ie, params.wpa_ie_len, &elems, 0)
+1977  	    < 0) {
+1978  		wpa_dbg(wpa_s, MSG_DEBUG, "SME: Could not parse own IEs?!");
+1979  		os_memset(&elems, 0, sizeof(elems));
+1980  	}
+1981  	if (elems.rsn_ie) {//根据elems内容填充params的其他字段
+1982  		params.wpa_proto = WPA_PROTO_RSN;
+1983  		wpa_sm_set_assoc_wpa_ie(wpa_s->wpa, elems.rsn_ie - 2,
+1984  					elems.rsn_ie_len + 2);
+1985  	} else if (elems.wpa_ie) {//根据elems内容填充params的其他字段
+1986  		params.wpa_proto = WPA_PROTO_WPA;
+1987  		wpa_sm_set_assoc_wpa_ie(wpa_s->wpa, elems.wpa_ie - 2,
+1988  					elems.wpa_ie_len + 2);
+1989  	} else if (elems.osen) {//根据elems内容填充params的其他字段
+1990  		params.wpa_proto = WPA_PROTO_OSEN;
+1991  		wpa_sm_set_assoc_wpa_ie(wpa_s->wpa, elems.osen - 2,
+1992  					elems.osen_len + 2);
+1993  	} else
+1994  		wpa_sm_set_assoc_wpa_ie(wpa_s->wpa, NULL, 0);
+1995  	if (elems.rsnxe)
+1996  		wpa_sm_set_assoc_rsnxe(wpa_s->wpa, elems.rsnxe - 2,
+1997  				       elems.rsnxe_len + 2);
+1998  	else
+1999  		wpa_sm_set_assoc_rsnxe(wpa_s->wpa, NULL, 0);
+2000  	if (wpa_s->current_ssid && wpa_s->current_ssid->p2p_group)
+2001  		params.p2p = 1;
+2002  
+2003  	if (wpa_s->p2pdev->set_sta_uapsd)
+2004  		params.uapsd = wpa_s->p2pdev->sta_uapsd;
+2005  	else
+2006  		params.uapsd = -1;
+2007  
+2008  	if (wpa_drv_associate(wpa_s, &params) < 0) {                               //开始关联
 2009  		wpa_msg(wpa_s, MSG_INFO, "SME: Association request to the "
 2010  			"driver failed");
 2011  		wpas_connection_failed(wpa_s, wpa_s->pending_bssid);
@@ -4646,7 +4747,7 @@ external/wpa_supplicant_8/wpa_supplicant/events.c
 3011  	wpa_s->own_reconnect_req = 0;
 3012    //注意前面设置的key_mgmt，WPA_KEY_MGMT_FT，因此ft_completed == sm->ft_completed,sm的类型是struct wpa_sm *
 3013  	ft_completed = wpa_ft_is_completed(wpa_s->wpa);//wpa_s->wpa的类型是struct wpa_sm *
-3014  	if (data && wpa_supplicant_event_associnfo(wpa_s, data) < 0)
+3014  	if (data && wpa_supplicant_event_associnfo(wpa_s, data) < 0)//处理驱动上报的assoc相关信息，见后续
 3015  		return;
 3016  	/*
 3017  	 * FILS authentication can share the same mechanism to mark the
@@ -4719,6 +4820,120 @@ external/wpa_supplicant_8/src/common/defs.h
 ```
 
 结合前面设置key_mgmt的分析，如果在WifiConfiguration中指定使用WPA_PSK，则ft_completed总是取决于wpa_s->wpa->ft_completed，如果指定使用WPA_EAP，则ft_completed为始终0 。
+
+
+
+##### wpa_supplicant_event_associnfo，wifi版本，信息元素ID
+
+
+
+wpa_supplicant_event_assoc中调用了wpa_supplicant_event_associnfo来处理assoc后驱动上报的信息，首先调用ieee802_11_parse_elems将帧中信息元素原始比特流解析成struct ieee802_11_elems结构体，req_elems对应association request管理帧中的信息元素，resp_elems对应association response管理帧中的信息元素。，然后结合req_elems和resp_elems把信息放入wpa_s结构体的相关字段里面，例如当前关联上当前ap后使用的wifi版本
+
+wpa_s-> connection_ht    wifi4  802.11n
+
+wpa_s-> connection_vht  wifi5  802.11ac
+
+wpa_s-> connection_he   wifi6  802.11ax
+
+external/wpa_supplicant_8/wpa_supplicant/events.c
+
+```c
+2602  static int wpa_supplicant_event_associnfo(struct wpa_supplicant *wpa_s,
+2603  					  union wpa_event_data *data)
+2604  {
+......
+2646  	wpa_s->connection_set = 0;
+2647  	if (data->assoc_info.req_ies && data->assoc_info.resp_ies) {
+2648  		struct ieee802_11_elems req_elems, resp_elems;
+2649  
+2650  		if (ieee802_11_parse_elems(data->assoc_info.req_ies,
+2651  					   data->assoc_info.req_ies_len,
+2652  					   &req_elems, 0) != ParseFailed &&
+2653  		    ieee802_11_parse_elems(data->assoc_info.resp_ies,
+2654  					   data->assoc_info.resp_ies_len,
+2655  					   &resp_elems, 0) != ParseFailed) {
+2656  			wpa_s->connection_set = 1;
+2657  			wpa_s->connection_ht = req_elems.ht_capabilities &&
+2658  				resp_elems.ht_capabilities;
+2659  			/* Do not include subset of VHT on 2.4 GHz vendor
+2660  			 * extension in consideration for reporting VHT
+2661  			 * association. */
+2662  			wpa_s->connection_vht = req_elems.vht_capabilities &&
+2663  				resp_elems.vht_capabilities &&
+2664  				(!data->assoc_info.freq ||
+2665  				 wpas_freq_to_band(data->assoc_info.freq) !=
+2666  				 BAND_2_4_GHZ);
+2667  			wpa_s->connection_he = req_elems.he_capabilities &&
+2668  				resp_elems.he_capabilities;
+2669  
+2670  			int max_nss_rx_req = get_max_nss_capability(&req_elems, 1);
+2671  			int max_nss_rx_resp = get_max_nss_capability(&resp_elems, 1);
+2672  			wpa_s->connection_max_nss_rx = (max_nss_rx_resp > max_nss_rx_req) ?
+2673  				max_nss_rx_req : max_nss_rx_resp;
+2674  			int max_nss_tx_req = get_max_nss_capability(&req_elems, 0);
+2675  			int max_nss_tx_resp = get_max_nss_capability(&resp_elems, 0);
+2676  			wpa_s->connection_max_nss_tx = (max_nss_tx_resp > max_nss_tx_req) ?
+2677  				max_nss_tx_req : max_nss_tx_resp;
+2678  
+2679  			struct supported_chan_width sta_supported_chan_width =
+2680  				get_supported_channel_width(&req_elems);
+2681  			enum chan_width ap_operation_chan_width =
+2682  				get_operation_channel_width(&resp_elems);
+2683  			if (wpa_s->connection_vht || wpa_s->connection_he) {
+2684  				wpa_s->connection_channel_bandwidth =
+2685  					get_sta_operation_chan_width(ap_operation_chan_width,
+2686  					sta_supported_chan_width);
+2687  			} else if (wpa_s->connection_ht) {
+2688  				wpa_s->connection_channel_bandwidth = (ap_operation_chan_width
+2689  					== CHAN_WIDTH_40) ? CHAN_WIDTH_40 : CHAN_WIDTH_20;
+2690  			} else {
+2691  				wpa_s->connection_channel_bandwidth = CHAN_WIDTH_20;
+2692  			}
+2693  		}
+2694  	}
+```
+
+当使用wpa_cli通过UNIX套接字执行  wpa_cli  -g@android:wpa_wlan0        IFNAME=wlan0    时，wpa_supplicant将返回这些信息：
+
+external/wpa_supplicant_8/wpa_supplicant/ctrl_iface.c
+
+```c
+2144  static int wpa_supplicant_ctrl_iface_status(struct wpa_supplicant *wpa_s,
+2145  					    const char *params,
+2146  					    char *buf, size_t buflen)
+2147  {
+......
+2248  		if (wpa_s->connection_set &&
+2249  		    (wpa_s->connection_ht || wpa_s->connection_vht ||
+2250  		     wpa_s->connection_he)) {
+2251  			ret = os_snprintf(pos, end - pos,
+2252  					  "wifi_generation=%u\n",
+2253  					  wpa_s->connection_he ? 6 :
+2254  					  (wpa_s->connection_vht ? 5 : 4));
+2255  			if (os_snprintf_error(end - pos, ret))
+2256  				return pos - buf;
+2257  			pos += ret;
+2258  		}
+......
+```
+
+也可以通过hidl接口去拿已连接AP的这些信息：
+
+![image-20220620164244122](wifi.assets/image-20220620164244122.png)
+
+
+
+注意，安卓9中也有wpa_supplicant_event_associnfo，但wpa_supplicant_event_associnfo没有代码去处理wifi版本相关信息，安卓11的wpa_suplicant才有这个功能。此外还需要驱动支持，即调用wpa_supplicant_event_associnfo时传入了union wpa_event_data *data，这是驱动通过netlink返回给wpa_supplciant的，需要在req_ies和resp_ies中有对应信息元素字段才行：
+
+![image-20220620165116836](wifi.assets/image-20220620165116836.png)
+
+信息元素字段定义在
+
+![image-20220620165242479](wifi.assets/image-20220620165242479.png)
+
+例如WLAN_EID_CAP这个ID对应的信息元素就是用来描述wifi4 802.11n相关物理层capability的。在《802.11无线网络权威指南》P103-P104对各种ID的信息元素有介绍，但由于其出版时间早于802.11n，ID为45的信息元素在该书上为保留字段，先如今已经用来描述802.11n物理层capability。
+
+
 
 
 
@@ -5167,7 +5382,7 @@ kernel/drivers/mmc/host/dw_mmc-rockchip.c
 
 
 
-在dw_mci_rockchip_probe函数中调用到dw_mci_pltfm_register。dw_mci_pltfm_register是dw_mmc-pltfm驱动模块导出的函数符号，dw_mci_rockchip_probe和dw_mci_pltfm_register负责解析设备树中的部分信息并放入struct dw_mci结构体host。
+在dw_mci_rockchip_probe函数中调用到dw_mci_pltfm_register。dw_mci_pltfm_register是dw_mmc-pltfm驱动模块导出的函数符号，dw_mci_rockchip_probe和dw_mci_pltfm_register负责解析设备树中的部分信息并放入struct dw_mci结构体host，例如***软件中断号***。
 
 
 
@@ -5183,6 +5398,13 @@ dw_mci_pltfm_register最后调用到了dw_mci_probe，dw_mci_probe是dw_mmc驱�
 3305  int dw_mci_probe(struct dw_mci *host)
 3306  {
 ......
+3433  	host->dma_ops = host->pdata->dma_ops;
+3434  	dw_mci_init_dma(host);
+......
+3482  	tasklet_init(&host->tasklet, dw_mci_tasklet_func, (unsigned long)host);//tasklet_init软件中断
+3483  	ret = devm_request_irq(host->dev, host->irq, dw_mci_interrupt,
+3484  			       host->irq_flags, "dw-mci", host);
+......
 3502  	/* We need at least one slot to succeed */
 3503  	ret = dw_mci_init_slot(host);
 ......
@@ -5190,9 +5412,23 @@ dw_mci_pltfm_register最后调用到了dw_mci_probe，dw_mci_probe是dw_mmc驱�
 3529  EXPORT_SYMBOL(dw_mci_probe);
 ```
 
+
+
+dw_mci_init_dma负责DMA相关的初始化，给host->dma_ops赋值。
+
+
+
+line 3482 初始化tasklet任务，其处理函数是dw_mci_tasklet_func
+
+
+
+line 3483调用devm_request_irq注册dw_mci_interrupt为中断上半部处理函数，对于使用的软件中断号，在前面dw_mci_pltfm_register函数从设备树生成的paltform_device解析后放入了host->irq。
+
+在dw_mci_interrupt中，如果有必要则唤醒 dw_mci_tasklet_func
+
+
+
 dw_mci_probe调用到了dw_mci_init_slot。
-
-
 
 
 
@@ -5259,6 +5495,8 @@ mmc_alloc_host函数关键部分在
 422  	host->class_dev.parent = dev;
 423  	host->class_dev.class = &mmc_host_class;
 ......
+if (mmc_gpio_alloc(host))
+......
 434  	INIT_DELAYED_WORK(&host->detect, mmc_rescan);
 435  	INIT_DELAYED_WORK(&host->sdio_irq_work, sdio_irq_work);
 ```
@@ -5273,6 +5511,12 @@ mmc_host_class定义在kernel/drivers/mmc/core/host.c：
 
 
 
+再来看mmc_gpio_alloc：
+
+
+
+
+
 **返回到dw_mci_init_slot函数中，后续调用在mmc_add_host函数，在mmc_add_host函数中调用device_add函数时就会在/sys/devices/platform/fe2c0000.msdc/下创建${class_dev.name}节点，对应dev的子设备。此外还会在/sys/class/下创建${mmc_host_class.name}节点。且没有在/sys/bus下创建节点，因为class_dev.bus没有指定。**
 
 
@@ -5284,6 +5528,20 @@ mmc_host_class定义在kernel/drivers/mmc/core/host.c：
 mmc_add_host函数调完device_add后再调mmc_start_host函数：
 
 ![image-20220308195711177](wifi.assets/image-20220308195711177.png)
+
+mmc_start_host函数调用mmc_gpiod_request_cd_irq ，mmc_gpiod_request_cd_irq 调用 devm_request_threaded_irq，devm_request_threaded_irq调用 request_threaded_irq  根据来注册独立的线程化中断来处理，注册的所有信息来自：
+
+```
+struct mmc_gpio *ctx = host->slot.handler_priv;
+```
+
+![image-20220627211920371](wifi.assets/image-20220627211920371.png)
+
+
+
+
+
+
 
 
 
@@ -5629,7 +5887,948 @@ kernel/include/linux/mod_devicetable.h
 
 
 
-### 10.5 sdio驱动
+### 10.5 mt7661驱动
+
+已知  gen4-mt7663
+
+
+interrupt        发送完成与收到数据时                wakeup           waitq_hif           hif_thread
+cfg80211       发送数据时                                wakeup            waitq                main_thread
+hif_thread中处理发送完成中断，如果是收到数据中断则wakeup   waitq  启动   main_thread
+main_thread  调用  kalSetTxEvent2Rx             wakeup           waitq_rx             rx_thread
+
+GLUE_FLAG_HIF_TX
+GLUE_FLAG_TXREQ
+
+
+GLUE_FLAG_HIF_TX_CMD
+
+
+
+
+
+
+
+重要数据结构：
+
+struct wireless_dev    
+
+struct wiphy
+
+prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
+
+prGlueInfo->prDevHandler  的类型是 struct net_dev * 即一个网络设备
+
+prNetDevPrivate = (struct NETDEV_PRIVATE_GLUE_INFO *) netdev_priv(prGlueInfo->prDevHandler);
+
+stuct net_device.ieee80211_ptr  =  struct wireless_dev *
+
+stuctwireless_dev.netdev = stuct net_device *
+
+
+
+
+
+ 
+
+#### 10.5.1 驱动初始化
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/gl_init.c
+
+```
+4535  module_init(initWlan);
+4536  module_exit(exitWlan);
+```
+
+
+
+```c
+4217  static int initWlan(void)
+4218  {
+......
+4250  	wlanCreateWirelessDevice();     //cfg_80211
+......
+4293  	ret = ((glRegisterBus(wlanProbe,
+4294  			      wlanRemove) == WLAN_STATUS_SUCCESS) ? 0 : -EIO);
+......
+4328  }
+```
+
+
+
+
+
+![image-20220627093502645](wifi.assets/image-20220627093502645.png)
+
+
+
+![image-20220627093647172](wifi.assets/image-20220627093647172.png)
+
+
+
+```c
+3406  static int32_t wlanProbe(void *pvData, void *pvDriverData)
+3407  {
+......
+3471  		prWdev = wlanNetCreate(pvData, pvDriverData);//创建struct net_dev
+......
+3493  		i4Status = glBusSetIrq(prWdev->netdev, NULL, prGlueInfo);//register sdio interrupt handle func
+......
+3513  		wlanGetConfig(prAdapter);//   load configuration file:   /vendor/firmware/wifi_mt7661.cfg
+......
+3619  		INIT_WORK(&prGlueInfo->rTxMsduFreeWork, kalFreeTxMsduWorker);
+3620  
+3621  		INIT_DELAYED_WORK(&prGlueInfo->rRxPktDeAggWork,
+3622  				halDeAggRxPktWorker);
+3623  
+3624  
+3625  		prGlueInfo->main_thread = kthread_run(main_thread,
+3626  				prGlueInfo->prDevHandler, "main_thread");
+3627  #if CFG_SUPPORT_MULTITHREAD
+3628  		prGlueInfo->hif_thread = kthread_run(hif_thread,
+3629  				prGlueInfo->prDevHandler, "hif_thread");
+3630  		prGlueInfo->rx_thread = kthread_run(rx_thread,
+3631  				prGlueInfo->prDevHandler, "rx_thread");
+3632  		HAL_AGG_THREAD(prGlueInfo->prAdapter);
+3633  #endif
+......
+3727  		i4DevIdx = wlanNetRegister(prWdev);
+......
+3958  }
+```
+
+
+
+#### 10.5.2 nl80211_cfg
+
+初始化时initWlan中调用了  wlanCreateWirelessDevice()
+
+```c
+2077  static void wlanCreateWirelessDevice(void)
+2078  {
+2079  	struct wiphy *prWiphy = NULL;
+2080  	struct wireless_dev *prWdev = NULL;
+2081  	unsigned int u4SupportSchedScanFlag = 0;
+2082  
+2083  	/* 4 <1.1> Create wireless_dev */
+2084  	prWdev = kzalloc(sizeof(struct wireless_dev), GFP_KERNEL);
+2085  	if (!prWdev) {
+2086  		DBGLOG(INIT, ERROR,
+2087  		       "Allocating memory to wireless_dev context failed\n");
+2088  		return;
+2089  	}
+2090  	/* 4 <1.2> Create wiphy */
+2091  #if CFG_ENABLE_UNIFY_WIPHY
+2092  	prWiphy = wiphy_new(&mtk_cfg_ops, sizeof(struct GLUE_INFO));
+2093  #else
+2094  	prWiphy = wiphy_new(&mtk_wlan_ops,
+2095  			    sizeof(struct GLUE_INFO));
+2096  #endif
+2097  
+2098  	if (!prWiphy) {
+2099  		DBGLOG(INIT, ERROR,
+2100  		       "Allocating memory to wiphy device failed\n");
+2101  		goto free_wdev;
+2102  	}
+2103  
+2104  	/* 4 <1.3> configure wireless_dev & wiphy */
+2105  	prWdev->iftype = NL80211_IFTYPE_STATION;
+2106  	prWiphy->iface_combinations = p_mtk_iface_combinations_sta;
+2107  	prWiphy->n_iface_combinations =
+2108  		mtk_iface_combinations_sta_num;
+2109  	prWiphy->max_scan_ssids = SCN_SSID_MAX_NUM +
+2110  				  1; /* include one wildcard ssid */
+2111  	prWiphy->max_scan_ie_len = 512;
+2112  #if CFG_SUPPORT_SCHED_SCAN
+2113  	prWiphy->max_sched_scan_ssids     =
+2114  		CFG_SCAN_HIDDEN_SSID_MAX_NUM;
+2115  	prWiphy->max_match_sets           =
+2116  		CFG_SCAN_SSID_MATCH_MAX_NUM;
+2117  	prWiphy->max_sched_scan_ie_len    = CFG_CFG80211_IE_BUF_LEN;
+2118  	u4SupportSchedScanFlag            =
+2119  		WIPHY_FLAG_SUPPORTS_SCHED_SCAN;
+2120  #endif /* CFG_SUPPORT_SCHED_SCAN */
+2121  	prWiphy->interface_modes = BIT(NL80211_IFTYPE_STATION) |
+2122  				   BIT(NL80211_IFTYPE_ADHOC);
+2123  	prWiphy->bands[KAL_BAND_2GHZ] = &mtk_band_2ghz;
+2124  	/* always assign 5Ghz bands here, if the chip is not support 5Ghz,
+2125  	 *  bands[KAL_BAND_5GHZ] will be assign to NULL
+2126  	 */
+2127  	prWiphy->bands[KAL_BAND_5GHZ] = &mtk_band_5ghz;
+2128  	prWiphy->signal_type = CFG80211_SIGNAL_TYPE_MBM;
+2129  	prWiphy->cipher_suites = (const u32 *)mtk_cipher_suites;
+2130  	prWiphy->n_cipher_suites = ARRAY_SIZE(mtk_cipher_suites);
+2131  	prWiphy->flags = WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL
+2132  			| u4SupportSchedScanFlag;
+2133  
+2134  #if CFG_SUPPORT_802_11R && CFG_SUPPORT_CFG80211_AUTH
+2135  	prWiphy->features |= NL80211_FEATURE_DS_PARAM_SET_IE_IN_PROBES;
+2136  	prWiphy->features |= NL80211_FEATURE_QUIET;
+2137  	prWiphy->features |= NL80211_FEATURE_TX_POWER_INSERTION;
+2138  #endif /* CFG_SUPPORT_ROAMING */
+2139  
+2140  #if (CFG_SUPPORT_ROAMING == 1)
+2141  	prWiphy->flags |= WIPHY_FLAG_SUPPORTS_FW_ROAM;
+2142  #endif /* CFG_SUPPORT_ROAMING */
+2143  
+2144  #if KERNEL_VERSION(3, 14, 0) > CFG80211_VERSION_CODE
+2145  	prWiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
+2146  #else
+2147  	prWiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
+2148  #if (CFG_SUPPORT_DFS_MASTER == 1)
+2149  	prWiphy->flags |= WIPHY_FLAG_HAS_CHANNEL_SWITCH;
+2150  #if KERNEL_VERSION(3, 16, 0) <= CFG80211_VERSION_CODE
+2151  	prWiphy->max_num_csa_counters = 2;
+2152  #endif
+2153  #endif /* CFG_SUPPORT_DFS_MASTER */
+2154  #endif
+2155  #if (CFG_SUPPORT_SAE == 1)
+2156  	prWiphy->features |= NL80211_FEATURE_SAE;
+2157  #endif /* CFG_SUPPORT_DFS_MASTER */
+2158  
+2159  	cfg80211_regd_set_wiphy(prWiphy);
+2160  
+2161  #if (CFG_SUPPORT_TDLS == 1)
+2162  	TDLSEX_WIPHY_FLAGS_INIT(prWiphy->flags);
+2163  #endif /* CFG_SUPPORT_TDLS */
+2164  	prWiphy->max_remain_on_channel_duration = 5000;
+2165  	prWiphy->mgmt_stypes = mtk_cfg80211_ais_default_mgmt_stypes;
+2166  
+2167  #if (CFG_SUPPORT_SCAN_RANDOM_MAC && \
+2168  	(KERNEL_VERSION(3, 19, 0) <= CFG80211_VERSION_CODE))
+2169  	prWiphy->features |= NL80211_FEATURE_SCAN_RANDOM_MAC_ADDR;
+2170  	prWiphy->features |= NL80211_FEATURE_SCHED_SCAN_RANDOM_MAC_ADDR;
+2171  #endif
+2172  
+2173  #if KERNEL_VERSION(3, 18, 0) <= CFG80211_VERSION_CODE
+2174  	prWiphy->vendor_commands = mtk_wlan_vendor_ops;
+2175  	prWiphy->n_vendor_commands = sizeof(mtk_wlan_vendor_ops) /
+2176  				     sizeof(struct wiphy_vendor_command);
+2177  	prWiphy->vendor_events = mtk_wlan_vendor_events;
+2178  	prWiphy->n_vendor_events = ARRAY_SIZE(
+2179  					   mtk_wlan_vendor_events);
+2180  #endif
+2181  	/* 4 <1.4> wowlan support */
+2182  #ifdef CONFIG_PM
+2183  #if KERNEL_VERSION(3, 11, 0) <= CFG80211_VERSION_CODE
+2184  	prWiphy->wowlan = &mtk_wlan_wowlan_support;
+2185  #else
+2186  	kalMemCopy(&prWiphy->wowlan, &mtk_wlan_wowlan_support,
+2187  		   sizeof(struct wiphy_wowlan_support));
+2188  #endif
+2189  #endif
+2190  
+2191  #ifdef CONFIG_CFG80211_WEXT
+2192  	/* 4 <1.5> Use wireless extension to replace IOCTL */
+2193  
+2194  #if CFG_ENABLE_UNIFY_WIPHY
+2195  	prWiphy->wext = NULL;
+2196  #else
+2197  	prWiphy->wext = &wext_handler_def;
+2198  #endif
+2199  #endif
+2200  	/* initialize semaphore for halt control */
+2201  	sema_init(&g_halt_sem, 1);
+2202  
+2203  #if CFG_ENABLE_UNIFY_WIPHY
+2204  	prWiphy->iface_combinations = p_mtk_iface_combinations_p2p;
+2205  	prWiphy->n_iface_combinations =
+2206  		mtk_iface_combinations_p2p_num;
+2207  
+2208  	prWiphy->interface_modes |= BIT(NL80211_IFTYPE_AP) |
+2209  				    BIT(NL80211_IFTYPE_P2P_CLIENT) |
+2210  				    BIT(NL80211_IFTYPE_P2P_GO) |
+2211  				    BIT(NL80211_IFTYPE_STATION);
+2212  	prWiphy->software_iftypes |= BIT(NL80211_IFTYPE_P2P_DEVICE);
+2213  	prWiphy->flags |= WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL |
+2214  			  WIPHY_FLAG_HAVE_AP_SME;
+2215  	prWiphy->ap_sme_capa = 1;
+2216  #endif
+2217  	if (wiphy_register(prWiphy) < 0) {                                    //注册struct wiphy
+2218  		DBGLOG(INIT, ERROR, "wiphy_register error\n");
+2219  		goto free_wiphy;
+2220  	}
+2221  	prWdev->wiphy = prWiphy;                     //struct wireless_dev.wiphy  = struct wiphy *
+2222  	gprWdev = prWdev;                            //使用struct wireless_dev *类型的全局变量指向被初始化的prWdev
+2223  	DBGLOG(INIT, INFO, "Create wireless device success\n");
+2224  	return;
+2225  
+2226  free_wiphy:
+2227  	wiphy_free(prWiphy);
+2228  free_wdev:
+2229  	kfree(prWdev);
+2230  }
+```
+
+
+
+
+
+
+
+#### 10.5.3 NAPI 网卡
+
+初始化时wlanProbe中调用了wlanNetCreate函数和wlanNetRegister函数
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/gl_init.c
+
+```c
+2369  static struct wireless_dev *wlanNetCreate(void *pvData,
+2370  		void *pvDriverData)
+2371  {
+2372  	struct wireless_dev *prWdev = gprWdev;//wlanCreateWirelessDevice中对gprWdev进行赋值
+2373  	struct GLUE_INFO *prGlueInfo = NULL;//mtk自己定义的数据结构，用于存储全局信息，struct wiphy.priv也指向这个地址
+......
+2376  	struct device *prDev;
+......
+2381  	struct wiphy *prWiphy = NULL;
+......
+2396  	prWiphy = prWdev->wiphy;
+......
+2412  	glGetDev(pvData, &prDev);//pvData是struct sdio_func *，prDev其实就是struct sdio_func中的struct device *
+......
+2417  	/* Some kernel API (ex: cfg80211_get_drvinfo) will use wiphy_dev().
+2418  	 * Without set_wiphy_dev(prWdev->wiphy, prDev), those API will crash.
+2419  	 */
+2420  	set_wiphy_dev(prWdev->wiphy, prDev);
+2421  
+2422  	/* 4 <2> Create Glue structure */
+2423  	prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
+2424  	kalMemZero(prGlueInfo, sizeof(struct GLUE_INFO));
+......
+2464  	prGlueInfo->prDevHandler =               //alloc_netdev_mq 创建分配初始化并返回一个struct net_dev *
+2465  		alloc_netdev_mq(sizeof(struct NETDEV_PRIVATE_GLUE_INFO),
+2466  				prInfName,
+2467  				ether_setup, CFG_MAX_TXQ_NUM);
+......
+2478  	/* Device can help us to save at most 3000 packets, after we stopped
+2479  	** queue
+2480  	*/
+2481  	prGlueInfo->prDevHandler->tx_queue_len = 3000;       //struct net_dev.tx_queue_len = 3000
+2482  
+2483  	/* 4 <3.1.1> Initialize net device varaiables */
+2484    //struct net_dev后面的那段内存存储的是struct NETDEV_PRIVATE_GLUE_INFO，在alloc_netdev_mq时分配的
+2485  	prNetDevPrivate = (struct NETDEV_PRIVATE_GLUE_INFO *)
+2486  			  netdev_priv(prGlueInfo->prDevHandler);
+2487  	prNetDevPrivate->prGlueInfo = prGlueInfo;//struct NETDEV_PRIVATE_GLUE_INF = struct GLUE_INFO *
+......
+2492  	prGlueInfo->prDevHandler->needed_headroom += NIC_TX_HEAD_ROOM;
+......
+2498  	prGlueInfo->prDevHandler->netdev_ops = &wlan_netdev_ops;//关键，网络协议栈最终调用里面的函数指针完成相关操作
+2499  #ifdef CONFIG_WIRELESS_EXT
+2500  	prGlueInfo->prDevHandler->wireless_handlers =     //WIRELESS_EXT相关,CFG80211_WEXT不用考虑
+2501  		&wext_handler_def;
+2502  #endif
+2503  	netif_carrier_off(prGlueInfo->prDevHandler);//链路载波关闭，表明当前struct net_dev物理连接处于断开状态
+2504  	netif_tx_stop_all_queues(prGlueInfo->prDevHandler);//于停止网络设备的所有发送队列。驱动层在关闭（shutdown）网络设备，或者设备链路断开及设备进入挂起节电模式等情况时，使用此函数停止所有发送队列
+2505  	kalResetStats(prGlueInfo->prDevHandler);//网卡统计信息清零，即把struct net_device的stats成员清零
+2506  
+2507  #if CFG_SUPPORT_SNIFFER
+2508  	INIT_WORK(&(prGlueInfo->monWork), wlanMonWorkHandler);//sniffer抓包相关，monitor模式使用，monwlan0
+2509  #endif
+2510  
+2511  	/* 4 <3.1.2> co-relate with wiphy bi-directionally */
+        //stuct net_device.ieee80211_ptr  =  struct wireless_dev *
+2512  	prGlueInfo->prDevHandler->ieee80211_ptr = prWdev;
+2513  
+2514  	prWdev->netdev = prGlueInfo->prDevHandler;//stuctwireless_dev.netdev = stuct net_device *
+2515  
+2516  	/* 4 <3.1.3> co-relate net device & prDev */
+2517  	SET_NETDEV_DEV(prGlueInfo->prDevHandler,  //struct net_device.dev->parent = struct wiphy.dev->parent
+2518  		       wiphy_dev(prWdev->wiphy));     //这样struct net_device和struct wiphy在sysfs中处于同一目录下
+2519  
+2520  	/* 4 <3.1.4> set device to glue */
+2521  	prGlueInfo->prDev = prDev;  //prGlueInfo->prDev  =  stuct net_device.dev
+......
+2540  	init_completion(&prGlueInfo->rScanComp);
+2541  	init_completion(&prGlueInfo->rHaltComp);
+2542  	init_completion(&prGlueInfo->rPendComp);
+......
+2575  	/* 4 <8> Init Queues */
+2576  	init_waitqueue_head(&prGlueInfo->waitq);
+2577  	QUEUE_INITIALIZE(&prGlueInfo->rCmdQueue);
+2578  	prGlueInfo->i4TxPendingCmdNum = 0;
+2579  	QUEUE_INITIALIZE(&prGlueInfo->rTxQueue);
+2580  	glSetHifInfo(prGlueInfo, (unsigned long) pvData);
+......
+2585  	/* main thread is created in this function */
+2586  #if CFG_SUPPORT_MULTITHREAD
+2587  	init_waitqueue_head(&prGlueInfo->waitq_rx);
+2588  	init_waitqueue_head(&prGlueInfo->waitq_hif);
+......
+2593  #endif
+2594  
+2595  	return prWdev;
+2596  
+2597  netcreate_err://错误处理
+......
+2608  	return NULL;
+2609  }
+```
+
+
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/gl_init.c
+
+```c
+1935  static int32_t wlanNetRegister(struct wireless_dev *prWdev)
+1936  {
+......
+1949  		prGlueInfo = (struct GLUE_INFO *) wiphy_priv(prWdev->wiphy);
+......
+1951  		i4DevIdx = wlanGetDevIdx(prWdev->netdev);
+......
+1961  		if (register_netdev(prWdev->netdev) < 0) {   //向内核注册struct net_dev
+......
+1973  		netif_napi_add(prWdev->netdev, &prGlueInfo->rNapi,
+1974  			kalRxNapiPoll, NAPI_POLL_WEIGHT);  //向sorftirq注册
+1975  		skb_queue_head_init(&prGlueInfo->rRxNapiSkbQ);
+......
+2012  	return i4DevIdx;	/* success */
+2013  }	
+```
+
+
+
+```
+void netif_napi_add(
+struct net_device *dev,  
+struct napi_struct *napi, 
+int (*poll)(struct napi_struct *, int), 
+int weight)
+```
+
+netif_napi_add会初始化  struct napi_struct  *napi所指向的那块内存，将传入的参数和其他创建的变量来初始化napi
+
+napi->dev = dev;//dev是传入的第一个参数
+
+napi->poll = poll;//poll是传入的第二个参数
+
+napi->weight = weight;//weight是传入的第三个参数
+
+***最后netif_napi_add还会间接地将传入的poll函数指针注册到sorftirq中。在中断上半部使用napi_schedule之后，ksorftirqd线程(或中断下半部)负责回调该函数指针。***
+
+```c
+static inline void napi_schedule(struct napi_struct *n) //传入struct napi_struct *napi
+```
+
+
+
+
+
+在wlanNetCreate line 2498,指定了netdev_ops   	prGlueInfo->prDevHandler->netdev_ops = &wlan_netdev_ops;
+
+![image-20220627203000380](wifi.assets/image-20220627203000380.png)
+
+
+
+##### NAPI发送函数
+
+
+
+
+
+##### sdio线程化中断函数注册
+
+初始化时wlanProbe中调用了glBusSetIrq函数
+
+![image-20220627101801954](wifi.assets/image-20220627101801954.png)
+
+使用sdio_claim_irq注册mtk_sdio_interrupt函数后，当触发SDIO中断时mmc子系统的中断处理线程就会间接调用到该函数：
+
+![image-20220627102159685](wifi.assets/image-20220627102159685.png)
+
+
+
+![image-20220627102133049](wifi.assets/image-20220627102133049.png)
+
+设置GLUE_FLAG_INT_BIT， 且wake_up_interruptible    waitq_hif这个等待队列
+
+
+
+
+
+```c
+3552  int hif_thread(void *data)
+3553  {
+......
+3572  	while (TRUE) {
+......
+3593  		do {
+3594  			ret = wait_event_interruptible(prGlueInfo->waitq_hif,//在waitq_hif这个wait_queue_head_t上等待
+3595  				((prGlueInfo->ulFlag & GLUE_FLAG_HIF_PROCESS)
+3596  				!= 0));
+3597  		} while (ret != 0);
+......
+3613  		if (test_and_clear_bit(GLUE_FLAG_INT_BIT,                    //处理GLUE_FLAG_INT_BIT
+3614  				       &prGlueInfo->ulFlag)) {
+3615  			/* the Wi-Fi interrupt is already disabled in mmc
+3616  			 * thread, so we set the flag only to enable the
+3617  			 * interrupt later
+3618  			 */
+3619  			prAdapter->fgIsIntEnable = FALSE;
+3620  			if (prGlueInfo->ulFlag & GLUE_FLAG_HALT
+3621  #if CFG_CHIP_RESET_SUPPORT
+3622  			    || kalIsResetting()
+3623  #endif
+3624  			   ) {
+3625  				/* Should stop now... skip pending interrupt */
+3626  				DBGLOG(INIT, INFO,
+3627  				       "ignore pending interrupt\n");
+3628  			} else {
+3629  				/* DBGLOG(INIT, INFO, ("HIF Interrupt!\n")); */
+3630  				prGlueInfo->TaskIsrCnt++;
+3631  				wlanIST(prAdapter);                                   //真正处理中断事件的地方
+3632  			}
+3633  		}
+......
+3676  	}
+......
+3696  }
+```
+
+
+
+![image-20220627111117770](wifi.assets/image-20220627111117770.png)
+
+
+
+![image-20220627111716724](wifi.assets/image-20220627111716724.png)
+
+
+
+
+
+![image-20220627111639564](wifi.assets/image-20220627111639564.png)
+
+
+
+nicProcessIST_impl依次调用apfnEventFuncTable函数指针数组中的函数指针进行处理，函数指针指向各种处理函数
+
+![image-20220627111811535](wifi.assets/image-20220627111811535.png)
+
+
+
+
+
+##### 对发送完成中断事件的处理
+
+![image-20220627113421769](wifi.assets/image-20220627113421769.png)
+
+
+
+
+
+
+
+
+
+##### 对接收中断事件的处理
+
+
+
+![image-20220627140731757](wifi.assets/image-20220627140731757.png)
+
+
+
+注意nicProcessRxInterrupt中调用halProcessRxInterrupt来从SDIO读取数据，然后处理数据，其实halProcessRxInterrupt还间接地调用其子函数设置了GLUE_FLAG_RX_BIT，并wakeup了一次可能阻塞在waitq上的main_thread。halProcessRxInterrupt函数返回到nicProcessRxInterrupt后再次设置了GLUE_FLAG_RX_BIT，并wakeup了一次可能阻塞在waitq上的main_thread。个人感觉有些多余，不过无所谓，多的那次main_thread可以什么都不处理(上一次循环已经处理了GLUE_FLAG_RX_BIT flag)。
+
+
+
+![image-20220627140808063](wifi.assets/image-20220627140808063.png)
+
+
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/hif/sdio/hal_api.c
+
+```c
+1402  void halRxSDIOAggReceiveRFBs(IN struct ADAPTER *prAdapter)
+1403  {
+......
+1413  	struct SDIO_RX_COALESCING_BUF *prRxBuf;
+......
+1429  	for (rxNum = 0; rxNum < 2; rxNum++) {
+......
+1520  		HAL_READ_RX_PORT(prAdapter, rxNum, u4RxAggLength,                     //从SDIO接口读取数据到prRxBuf
+1521  			prRxBuf->pvRxCoalescingBuf, HIF_RX_COALESCING_BUFFER_SIZE);
+......
+1550  		halDeAggRxPkt(prAdapter, prRxBuf);                                   //处理接收到的数据
+1551  
+1552  		/* Update statistic counter */
+1553  		prHifInfo->rStatCounter.u4PktReadCnt[rxNum] += u4RxAggCount;
+1554  		prHifInfo->rStatCounter.u4PortReadCnt[rxNum]++;
+1555  	}
+1556  
+1557  }
+```
+
+
+
+
+
+![image-20220628101317829](wifi.assets/image-20220628101317829.png)
+
+
+
+![image-20220628101349039](wifi.assets/image-20220628101349039.png)
+
+
+
+![image-20220628101646824](wifi.assets/image-20220628101646824.png)
+
+
+
+读取从SDIO数据完毕一路返回到halRxSDIOAggReceiveRFBs后调用halDeAggRxPkt来处理数据：
+
+![image-20220628103742060](wifi.assets/image-20220628103742060.png)
+
+
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/hif/sdio/hal_api.c
+
+```
+2304  void halDeAggRxPktProc(struct ADAPTER *prAdapter,
+2305  			struct SDIO_RX_COALESCING_BUF *prRxBuf)
+2306  {
+......
+2311  	struct QUE *prTempRxRfbList = &rTempRxRfbList;
+2312  	struct RX_CTRL *prRxCtrl;
+2313  	struct SW_RFB *prSwRfb = (struct SW_RFB *) NULL;
+......
+2330  	QUEUE_INITIALIZE(prTempFreeRfbList);
+2331  	QUEUE_INITIALIZE(prTempRxRfbList);
+......
+2372  	for (i = 0; i < prRxBuf->u4PktCount; i++) {
+......
+2391  		prSwRfb->ucPacketType =                  //记录frame数据包的PacketType,后续nicRxProcessRFBs函数中使用
+2392  		  (uint8_t)HAL_RX_STATUS_GET_PKT_TYPE(prSwRfb->prRxStatus);
+......
+2412  		QUEUE_INSERT_TAIL(prTempRxRfbList, &prSwRfb->rQueEntry);//把数据包放入prTempRxRfbList末尾
+......
+2415  	}
+......
+2446  		QUEUE_CONCATENATE_QUEUES(&prRxCtrl->rReceivedRfbList,
+2447  					prTempRxRfbList);   //使用prTempRxRfbList来初始化prGlueInfo->rRxCtrl->rReceivedRfbList
+......
+2451  		/* Wake up Rx handling thread */
+2452  		set_bit(GLUE_FLAG_RX_BIT, &(prAdapter->prGlueInfo->ulFlag));
+2453  		wake_up_interruptible(&(prAdapter->prGlueInfo->waitq));
+......
+2468  }
+```
+
+
+
+
+
+main_thread经过waitq等待队列以后调用nicRxProcessRFBs来处理GLUE_FLAG_RX_BIT：
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/gl_kal.c
+
+```c
+3841  int main_thread(void *data)
+3842  {
+......
+3870  	while (TRUE) {
+......
+3895  		do {
+3896  			ret = wait_event_interruptible(prGlueInfo->waitq,
+3897  				((prGlueInfo->ulFlag & GLUE_FLAG_MAIN_PROCESS)
+3898  				!= 0));
+3899  		} while (ret != 0);
+......
+4045  #if CFG_SUPPORT_MULTITHREAD
+4046  		/* Process RX */
+4047  		if (test_and_clear_bit(GLUE_FLAG_RX_BIT,
+4048  				       &prGlueInfo->ulFlag))
+4049  			nicRxProcessRFBs(prGlueInfo->prAdapter);
+......
+4113  	return 0;
+4114  
+4115  }
+```
+
+
+
+
+
+
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/nic/nic_rx.c
+
+```c
+3935  /*----------------------------------------------------------------------------*/
+3936  /*!
+3937   * @brief nicProcessRFBs is used to process RFBs in the rReceivedRFBList queue.
+3938   *
+3939   * @param prAdapter Pointer to the Adapter structure.
+3940   *
+3941   * @return (none)
+3942   */
+3943  /*----------------------------------------------------------------------------*/
+3944  void nicRxProcessRFBs(IN struct ADAPTER *prAdapter)
+3945  {
+3946  	struct RX_CTRL *prRxCtrl;
+3947  	struct SW_RFB *prSwRfb = (struct SW_RFB *) NULL;
+3948  	struct QUE rTempRfbList;
+3949  	struct QUE *prTempRfbList = &rTempRfbList;
+3950  	uint32_t u4RxLoopCount, u4Tick;
+3951  
+3952  	KAL_SPIN_LOCK_DECLARATION();
+3953  
+3954  	DEBUGFUNC("nicRxProcessRFBs");
+3955  
+3956  	ASSERT(prAdapter);
+3957  
+3958  	prRxCtrl = &prAdapter->rRxCtrl;
+3959  	ASSERT(prRxCtrl);
+3960  
+3961  	prRxCtrl->ucNumIndPacket = 0;
+3962  	prRxCtrl->ucNumRetainedPacket = 0;
+3963  	u4RxLoopCount = prAdapter->rWifiVar.u4TxRxLoopCount;
+3964  	u4Tick = kalGetTimeTick();
+3965  
+3966  	QUEUE_INITIALIZE(prTempRfbList);
+3967  
+3968  	while (u4RxLoopCount--) {
+3969  		while (QUEUE_IS_NOT_EMPTY(&prRxCtrl->rReceivedRfbList)) {//prGlueInfo->rRxCtrl->rReceivedRfbList
+3970  
+3971  			/* check process RFB timeout */
+3972  			if ((kalGetTimeTick() - u4Tick) > RX_PROCESS_TIMEOUT) {
+3973  				DBGLOG(RX, WARN, "Rx process RFBs timeout\n");
+3974  				break;
+3975  			}
+3976  
+3977  			KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_RX_QUE);
+3978  			QUEUE_MOVE_ALL(prTempRfbList,prTempRfbList        //把prGlueInfo->rRxCtrl->rReceivedRfbList中
+3979  				&prRxCtrl->rReceivedRfbList);                 //的元素移动到prTempRfbList队列
+3980  			KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_RX_QUE);
+3981  
+3982  			while (QUEUE_IS_NOT_EMPTY(prTempRfbList)) {//遍历prTempRfbList队列中的元素
+3983  				QUEUE_REMOVE_HEAD(prTempRfbList,       //每次遍历时取出并删除第一个元素
+3984  					prSwRfb, struct SW_RFB *);
+3985  
+3986  				if (!prSwRfb)
+3987  					break;
+3988  #if CFG_SUPPORT_WAKEUP_REASON_DEBUG
+3989  				if (kalIsWakeupByWlan(prAdapter))
+3990  					nicRxCheckWakeupReason(prAdapter,
+3991  							       prSwRfb);
+3992  #endif
+3993  
+3994  				switch (prSwRfb->ucPacketType) {
+3995  				case RX_PKT_TYPE_RX_DATA:
+3996  					if (HAL_MON_EN(prAdapter)) {
+3997  						nicRxProcessMonitorPacket(
+3998  							prAdapter, prSwRfb);
+3999  						break;
+4000  					}
+4001  
+4002  					nicRxProcessDataPacket(             //最终使用NAPI丢入了网络协议栈，貌似是处理IP数据包
+4003  						prAdapter, prSwRfb);
+4004  					break;
+4005  
+4006  				case RX_PKT_TYPE_SW_DEFINED:
+4007  					/* HIF_RX_PKT_TYPE_EVENT */
+4008  					if ((prSwRfb->prRxStatus->u2PktTYpe &
+4009  					     RXM_RXD_PKT_TYPE_SW_BITMAP) ==
+4010  					    RXM_RXD_PKT_TYPE_SW_EVENT) {
+4011  						nicRxProcessEventPacket(      //处理pending状态的cfg_80211命令
+4012  							prAdapter,
+4013  							prSwRfb);
+4014  					}
+4015  					/* case HIF_RX_PKT_TYPE_MANAGEMENT: */
+4016  					else if ((prSwRfb->prRxStatus->u2PktTYpe
+4017  						& RXM_RXD_PKT_TYPE_SW_BITMAP) ==
+4018  						RXM_RXD_PKT_TYPE_SW_FRAME) {
+4019  						/* OFLD pkts should go data flow
+4020  						 * 1: EAPOL
+4021  						 * 2: ARP / NS
+4022  						 * 3: TDLS
+4023  						 */
+4024  						if (HAL_RX_STATUS_GET_OFLD(               
+4025  							prSwRfb->prRxStatus))
+4026  							nicRxProcessDataPacket(//最终使用NAPI丢入了网络协议栈，貌似是处理处理EAPOL/ARP/TDLS
+4027  							prAdapter, prSwRfb);
+4028  						else
+4029  							nicRxProcessMgmtPacket(//调用相关函数处理收到的80211 MAC管理帧
+4030  							prAdapter, prSwRfb);
+4031  					} else {
+4032  						DBGLOG(RX, ERROR,
+4033  							"u2PktTYpe(0x%04X) is OUT OF DEF.!!!\n",
+4034  						  prSwRfb->prRxStatus->
+4035  						  u2PktTYpe);
+4036  						DBGLOG_MEM8(RX, ERROR,
+4037  							prSwRfb->pucRecvBuff,
+4038  							prSwRfb->prRxStatus->
+4039  							u2RxByteCount);
+4040  
+4041  						/*ASSERT(0);*/
+4042  						nicRxReturnRFB(prAdapter,
+4043  							prSwRfb);
+4044  						RX_INC_CNT(prRxCtrl,
+4045  							RX_TYPE_ERR_DROP_COUNT);
+4046  						RX_INC_CNT(prRxCtrl,
+4047  							RX_DROP_TOTAL_COUNT);
+4048  
+4049  					}
+4050  					break;
+4051  
+4052  				case RX_PKT_TYPE_MSDU_REPORT://  MAC Service Data Unit   
+4053  					nicRxProcessMsduReport(prAdapter,
+4054  						prSwRfb);
+4055  					break;
+4056  
+4057  				/* case HIF_RX_PKT_TYPE_TX_LOOPBACK: */
+4058  				/* case HIF_RX_PKT_TYPE_MANAGEMENT: */
+4059  				case RX_PKT_TYPE_TX_STATUS:
+4060  				case RX_PKT_TYPE_RX_VECTOR:
+4061  				case RX_PKT_TYPE_TM_REPORT:
+4062  				default:
+4063  					nicRxReturnRFB(prAdapter, prSwRfb);
+4064  					RX_INC_CNT(prRxCtrl,
+4065  						RX_TYPE_ERR_DROP_COUNT);
+4066  					RX_INC_CNT(prRxCtrl,
+4067  						RX_DROP_TOTAL_COUNT);
+4068  					DBGLOG(RX, ERROR, "ucPacketType = %d\n",
+4069  					       prSwRfb->ucPacketType);
+4070  					break;
+4071  				}
+......
+```
+
+
+
+
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/nic/nic_rx.c
+
+```c
+1966  void nicRxProcessDataPacket(IN struct ADAPTER *prAdapter,
+1967  			    IN OUT struct SW_RFB *prSwRfb)
+1968  {
+1969  	struct RX_CTRL *prRxCtrl;
+1970  	struct SW_RFB *prRetSwRfb, *prNextSwRfb;
+......
+2180  		prRetSwRfb = qmHandleRxPackets(prAdapter, prSwRfb);//在里面把eDst = RX_PKT_DESTINATION_HOST;
+......
+2237  				switch (prRetSwRfb->eDst) {
+2238  				case RX_PKT_DESTINATION_HOST:
+......
+2254  					nicRxProcessPktWithoutReorder(
+2255  						prAdapter, prRetSwRfb);
+2256  					break;
+......
+4052  				case RX_PKT_TYPE_MSDU_REPORT:
+4053  					nicRxProcessMsduReport(prAdapter,
+4054  						prSwRfb);
+4055  					break;
+```
+
+
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/nic/nic_rx.c
+
+```
+1180  void nicRxProcessPktWithoutReorder(IN struct ADAPTER
+1181  				   *prAdapter, IN struct SW_RFB *prSwRfb)
+1182  {
+......
+1277  		kalSetTxEvent2Rx(prAdapter->prGlueInfo);
+1306  }
+```
+
+
+
+![image-20220628113101815](wifi.assets/image-20220628113101815.png)
+
+
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/gl_kal.c
+
+```c
+3698  int rx_thread(void *data)
+3699  {
+......
+3739  	while (TRUE) {
+......
+3755  		/*
+3756  		 * sleep on waitqueue if no events occurred.
+3757  		 */
+3758  		do {
+3759  			ret = wait_event_interruptible(prGlueInfo->waitq_rx,       // wait_event  waitq_rx
+3760  			    ((prGlueInfo->ulFlag & GLUE_FLAG_RX_PROCESS) != 0));
+3761  		} while (ret != 0);
+......
+3768  		if (test_and_clear_bit(GLUE_FLAG_RX_TO_OS_BIT,            //处理GLUE_FLAG_RX_TO_OS_BIT标志
+3769  				       &prGlueInfo->ulFlag)) {
+3770  			u4LoopCount =
+3771  			    prGlueInfo->prAdapter->rWifiVar.u4Rx2OsLoopCount;
+3772  
+3773  			while (u4LoopCount--) {
+3774  				while (QUEUE_IS_NOT_EMPTY(
+3775  				       &prGlueInfo->prAdapter->rRxQueue)) {
+3776  					QUEUE_INITIALIZE(prTempRxQue);
+3777  
+3778  					GLUE_ACQUIRE_SPIN_LOCK(prGlueInfo,
+3779  					    SPIN_LOCK_RX_TO_OS_QUE);
+3780  					QUEUE_MOVE_ALL(prTempRxQue,
+3781  					    &prGlueInfo->prAdapter->rRxQueue);
+3782  					GLUE_RELEASE_SPIN_LOCK(prGlueInfo,
+3783  					    SPIN_LOCK_RX_TO_OS_QUE);
+3784  
+3785  					while (QUEUE_IS_NOT_EMPTY(
+3786  						prTempRxQue)) {
+3787  						QUEUE_REMOVE_HEAD(prTempRxQue,
+3788  						    prQueueEntry,
+3789  						    struct QUE_ENTRY *);
+3790  						kalRxIndicateOnePkt(prGlueInfo,                      //真正处理的地方
+3791  						    (void *)
+3792  						    GLUE_GET_PKT_DESCRIPTOR(
+3793  						    prQueueEntry));
+3794  					}
+3795  
+3796  				    KAL_WAKE_LOCK_TIMEOUT(prGlueInfo->prAdapter,
+3797  					&prGlueInfo->rTimeoutWakeLock,
+3798  					MSEC_TO_JIFFIES(prGlueInfo->prAdapter
+3799  					->rWifiVar.u4WakeLockRxTimeout));
+3800  				}
+3801  			}
+3802  		}
+3803  	}
+```
+
+vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/gl_kal.c
+
+```
+976  uint32_t kalRxIndicateOnePkt(IN struct GLUE_INFO
+977  			     *prGlueInfo, IN void *pvPkt)
+978  {
+......
+1130  		napi_schedule(&prGlueInfo->rNapi);
+1131  		return WLAN_STATUS_SUCCESS;
+......
+1141  }
+```
+
+
+
+在wlanNetRegister中调用了
+
+```
+1973  		netif_napi_add(prWdev->netdev, &prGlueInfo->rNapi,
+1974  			kalRxNapiPoll, NAPI_POLL_WEIGHT);
+```
+
+因此在kalRxIndicateOnePkt调用napi_schedule(&prGlueInfo->rNapi)后，在ksorftirqd线程中会间接调用到kalRxNapiPoll，在kalRxNapiPoll中负责调用NAPI的接口将skb发送到上层网络协议栈。
+
+
+
+![image-20220628113633350](wifi.assets/image-20220628113633350.png)
+
+
+
+
 
 
 
@@ -5802,17 +7001,17 @@ ch001, 39, 39, 39, 38, 38, 36, 36, 35,  39
 <vht20, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9>  //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
 ch001,  39, 39, 39, 38, 38, 37, 37, 36, 33, 32
 ......
-</vht20>                                   //vht20是802.11n HT20 
+</vht20>                                   //vht20是802.11ac  
 
 <vht40, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9>  //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
 ch001,  39, 39, 39, 38, 38, 36, 36, 35, 32, 31
 ......
-</vht40>                                      //vht40是802.11n vht40
+</vht40>                                      //vht40是802.11ac 
 
 <vht80, m0, m1, m2, m3, m4, m5, m6, m7, m8, m9>  //横行为不同的编码方式即mcs0、mcs1等等这些，竖行对应不同的信道
 ch036,  37, 37, 37, 35, 35, 34, 34, 32, 30, 30
 ......
-</vht80>                                    //vht80是802.11n vht80
+</vht80>                                    //vht80是802.11ac 
 ```
 
 
@@ -5858,6 +7057,75 @@ WifiNative.java
 
 
 ## 12. wifi相关名词及概念
+
+
+
+  
+
+```
+802.11b : WiFi 1
+802.11a : WiFi 2
+802.11g : WiFi 3
+802.11n : WiFi 4
+802.11ac : WiFi 5
+802.11ax : WiFi 6
+802.11be : WiFi 7
+```
+
+大话无线通信.pdf
+
+
+
+
+书籍推荐
+
+https://zhuanlan.zhihu.com/p/20716157
+
+
+
+**3.Linux Kernel Networking**
+
+该书主要是描述了Linux内核中网络的实现部分，其第12章具体就是对应无线模块。由于描述Linux内核中无线模块资料比较少，所以这本书也是比较推荐的，只不过对于细节部分，该书描述不是特别细致，不过总体还是不错的。该书以及其源码的资源如下，【[Linux Kernel Networking ](https://link.zhihu.com/?target=http%3A//download.csdn.net/detail/fzxy002763/9578509)】。
+
+**4.Linux Wi-Fi open source drivers-mac 802.11**
+
+该材料比较完整的叙述了从kernel到802.11驱动底层的一个函数调用过程，用来学习802.11具体驱动过程是一份比较好的材料。该资料的资源如下，【[Linux Wi-Fi open source drivers-mac 802.11](https://link.zhihu.com/?target=http%3A//download.csdn.net/detail/fzxy002763/9712191)】。
+
+
+
+
+
+
+
+
+
+
+
+CSMA/CD与CSMA/CA
+
+https://zhuanlan.zhihu.com/p/20731045
+
+openwifi
+
+https://www.zhihu.com/zvideo/1499133891747737600
+
+
+
+
+
+mac地址：
+
+https://baike.baidu.com/item/MAC%E5%9C%B0%E5%9D%80/1254181?fr=aladdin
+
+网络中每台设备都有一个唯一的网络标识，这个地址叫MAC地址或网卡地址，由网络设备制造商生产时写在硬件内部。MAC地址则是48位的（6个字节），通常表示为12个16进制数，每2个16进制数之间用冒号隔开，如08：00：20：0A：8C：6D就是一个MAC地址。具体如下图所示，其前3字节表示OUI（Organizationally Unique Identifier），是[IEEE](https://baike.baidu.com/item/IEEE/150905)的注册管理机构给不同厂家分配的代码，区分不同的厂家。后3字节由厂家自行分配 [2] 。
+
+MAC地址最高字节（MSB）的低第二位（LSb）表示这个MAC地址是全局的还是本地的，即U/L（Universal/Local）位，如果为0，表示是全局地址。所有的OUI这一位都是0。
+
+MAC地址最高字节（MSB）的低第一位(LSb），表示这个MAC地址是单播还是多播。0表示单播。
+
+
+
+
 
 https://zhuanlan.zhihu.com/p/20731045
 

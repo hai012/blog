@@ -501,10 +501,9 @@ libxxx.so:
 LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 LOCAL_MODULE_TAGS := optional
-#LOCAL_SRC_FILES := arm64/libmycjson.so
 LOCAL_SRC_FILES := arm64/libmycjson.so
+LOCAL_MODULE := libmycjson
 LOCAL_MODULE_SUFFIX := .so
-LOCAL_MODULE := libmycjson.so
 LOCAL_MODULE_CLASS := SHARED_LIBRARIES
 LOCAL_MULTILIB := 64
 include $(BUILD_PREBUILT)
@@ -520,6 +519,42 @@ LOCAL_MODULE_CLASS := SHARED_LIBRARIES
 LOCAL_MULTILIB := 64
 include $(BUILD_PREBUILT)
 ```
+
+app:
+
+https://blog.csdn.net/a462533587/article/details/46380795
+
+以下方式需要解压app中的so库，编译时自动查找当前目录lib下的所有so库并打包
+
+```
+LOCAL_PATH := $(call my-dir)
+include $(CLEAR_VARS)
+LOCAL_MODULE := UCBrowser
+LOCAL_MODULE_CLASS := APPS
+LOCAL_MODULE_TAGS := optional
+LOCAL_BUILT_MODULE_STEM := package.apk
+LOCAL_MODULE_SUFFIX := $(COMMON_ANDROID_PACKAGE_SUFFIX)
+LOCAL_CERTIFICATE := PRESIGNED
+LOCAL_SRC_FILES := HK_UCBrowser*.apk
+LOCAL_PRIVILEGED_MODULE := true
+LOCAL_MULTILIB := 32
+JNI_LIBS :=
+$(foreach FILE,$(shell find $(LOCAL_PATH)/lib/ -name *.so), $(eval JNI_LIBS += $(FILE)))
+LOCAL_PREBUILT_JNI_LIBS := $(subst $(LOCAL_PATH),,$(JNI_LIBS))
+include $(BUILD_PREBUILT)
+```
+
+如果不想解压，可以在LOCAL_PREBUILT_JNI_LIBS中使用@，然后手动加入so库的名字：
+
+```
+LOCAL_PREBUILT_JNI_LIBS = \
+@lib/armeabi-v7a/libcryptox.so \
+@lib/armeabi-v7a/libfb.so 
+```
+
+
+
+
 
 ### b、多模块prebuild
 
