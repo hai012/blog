@@ -6164,6 +6164,27 @@ vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/os/linux/gl_in
 
 
 
+cfg80211
+net/wireless/nl80211.c 定义了很多函数，例如 nl80211_trigger_scan，当netlink发来NL80211_CMD_TRIGGER_SCAN命令后nl80211_trigger_scan负责调用struct nl80211_ops里面的scan函数指针来进行处理。
+
+net/wireless/scan.c    定义了很多函数，例如 cfg80211_put_bss      ___cfg80211_scan_done/nl80211_send_scan_result/ 
+
+
+
+mac80211
+common/net/mac80211/mlme.c
+net/mac80211/scan.c
+
+ieee80211_rx
+  |------ieee80211_sta_rx_queued_mgmt 
+  |------__ieee80211_data_to8023 ----- netif_receive_skb 
+
+
+
+
+
+
+
 
 
 #### 10.5.3 NAPI 网卡
@@ -6633,7 +6654,7 @@ vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/nic/nic_rx.c
 4008  					if ((prSwRfb->prRxStatus->u2PktTYpe &
 4009  					     RXM_RXD_PKT_TYPE_SW_BITMAP) ==
 4010  					    RXM_RXD_PKT_TYPE_SW_EVENT) {
-4011  						nicRxProcessEventPacket(      //处理pending状态的cfg_80211命令
+4011  						nicRxProcessEventPacket(      //处理相关事件，例如扫描完成事件
 4012  							prAdapter,
 4013  							prSwRfb);
 4014  					}
@@ -6648,10 +6669,10 @@ vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4-mt7663/nic/nic_rx.c
 4023  						 */
 4024  						if (HAL_RX_STATUS_GET_OFLD(               
 4025  							prSwRfb->prRxStatus))
-4026  							nicRxProcessDataPacket(//最终使用NAPI丢入了网络协议栈，貌似是处理处理EAPOL/ARP/TDLS
+4026  							nicRxProcessDataPacket(//最终使用NAPI丢入网络协议栈，貌似是处理处理EAPOL/ARP/TDLS帧
 4027  							prAdapter, prSwRfb);
 4028  						else
-4029  							nicRxProcessMgmtPacket(//调用相关函数处理收到的80211 MAC管理帧
+4029  							nicRxProcessMgmtPacket(//处理收到的80211 MAC管理帧，例如probe response
 4030  							prAdapter, prSwRfb);
 4031  					} else {
 4032  						DBGLOG(RX, ERROR,
