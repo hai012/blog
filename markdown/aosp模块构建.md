@@ -670,7 +670,27 @@ bp:     vintf_fragments: ["manifest_foo.xml"],
 
 
 
+### framework.jar
 
+framework.jar在APP进程和system_server进程都有，也就是androidSDK
+
+首先引入一个android.mk变量LOCAL_BUILT_MODULE_STEM ，对应android.bp为stem，该变量可以指定某个模块最终编译输出的文件名。在某个模块的mk指定LOCAL_MODULE_STEM，最终编译输出的文件名是$(LOCAL_MODULE_STEM)$(LOCAL_MODULE_SUFFIX)，没有指定就是$(LOCAL_MODULE)$(LOCAL_MODULE_SUFFIX)，即模块名字+后缀，后缀取决于模块最终编译的是.so .a .jar app还是binary等。
+
+out/target/product/rk356x_rock_3a_r/system/framework/framework.jar 其实是由framework-minus-apex模块构建出来的，因此如果修改了framework.jar的东西，需要先make framework-minus-apex 然后再make snod或者直接make  systemimage
+
+![image-20220504195100608](aosp模块构建.assets/image-20220504195100608.png)
+
+
+
+![image-20220504195854982](aosp模块构建.assets/image-20220504195854982.png)
+
+
+
+
+
+### services.jar
+
+services.jar只在system_server进程中存在，一般com.android.service.*的包最终都编译进了services.jar，这些服务使用hwbinder的client端来实现binder服务的server端。
 
 
 

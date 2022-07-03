@@ -1,0 +1,30 @@
+
+磁盘信息如下，现在需要把/dev/mmcblk1p3 分区的容量让给/dev/mmcblk1p2 分区，/dev/mmcblk1p2 分区是系统根分区/
+
+
+
+
+首先把/dev/mmcblk1p3 和/dev/mmcblk1p2分区表项删掉，然后新建/dev/mmcblk1p2 分区表项，注意新建的/dev/mmcblk1p2 分区表项起始sector要跟原来一样，终止sector要大于原来的且4K对齐
+root@rock-board# fdisk /dev/mmcblk1
+Command (m for help): d
+选择分区3
+Command (m for help): d
+选择分区2
+重点删除2分区表项后不能进行保存，不然数据会全部丢失
+Command (m for help): p
+Command (m for help): n
+Partition number (1-3): 2
+回车
+回车
+Command (m for help): w
+再次分好区后进行保存不会数据丢失，这就是在分区情况下无损扩容
+
+
+接下来让内核重新读取磁盘分区表信息，避免重启
+root@rock-board# partprobe /dev/sdb1    
+
+最后使用如下命令修复分区让分区真正变成对应的尺寸
+root@rock-board# resize2fs /dev/sdb1
+
+如果分区处于未挂载的情况下建议先用如下命令修复以下已损坏的文件
+# e2fsck -f /dev/sdb1
