@@ -385,7 +385,7 @@ NR_SOFTIRQS
 
 2. ksoftirqd内核线程被唤醒后处理
 
-3. 显式地在线程上下文调用do_softirq进行软中断处理，例如在内核网络代码中，netif_rx_ni函数会主动调用do_softirq进行软中断理
+3. 显式地在线程上下文调用do_softirq，如果ksoftirqd未run，则在线程的上下文调用__do_softirq进行处理，否则还是由ksoftirqd处理。
 
 
 

@@ -110,7 +110,46 @@ queue  和 deque  都能在front使用front()方法返回队列头元素，在ba
 
 
 
+模板函数
+find
+swap
+min
+max
+sprintf            to_string
+atoi                stoi
+atof    strtof    stof
+atol    strtol    stol
+atoll   strtoll   stoll
+        strtod    stod
+        strtold   stold
+        strtoul   stoul
+        strtoull  stoull
+        strtok
 
+
+
+
+
+c++  string转int/long/long long  
+
+c++  int/long/long long  转 string
+http://t.zoukankan.com/lizhenghao126-p-11053624.html
+
+![cpp_string_to_int,double,etc](cpp_learning.assets/cpp_string_to_int,double,etc.JPG)
+
+
+
+
+
+先写头文件并找出并包含其中使用到的类、基本类型、模板类、宏、typedef类型的的声明头文件，不关注其他声明头文件之间的包含关系
+
+写cpp文件，如果cpp文件使用到了对应头文件中使用的、在其他文件中声明的类型，则可以不去找它们的声明文件再包含。否则需要找到
+其声明头文件并包含进来。
+
+头文件有两个作用：
+1、定义公共抽象接口模板等元素，让其他头文件或类包含
+2、向外部暴漏类的使用接口。
+其他情况下类的声明应该尽可能地放在cpp文件中。
 
 
 

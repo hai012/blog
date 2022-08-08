@@ -93,10 +93,7 @@ __arm64_sys_finit_module
 load_module
 do_init_module
 do_one_initcall
-__
-
-
-
+init_module
 __platform_driver_register
 driver_register
 __pi_strcmp
@@ -113,14 +110,16 @@ CPU   ->   System Settings ->   设置CPU为 Cortex A57， Mode为Up
 l __pi_strcmp+0x8c
 由此弹出的对话框可以直接定位到__pi_strcmp+0x8c的那条指令：
 
+```
                   125 | ////////////////////////////////////////////////////////////////////////////////////
 MX:0xFFFFFF8008F18978 | 38401423       ldrb    w3,[x1],#0x1     ; w3,[x1],#1
+```
 
 点击这条指令所在行后，在左下角也能看到该条指令相对某个符号的偏移:
 MX:0xFFFFFF8008F18978  \\vmlinux\Global\__pi_strcmp+0x8C
 该条指令上面的一行意思是该条指令由源文件中第125行生成。
 
-因为该条指令导致异常，一定是因为x1寄存器中的地址为空。
+因为该条指令导致异常硬件跳转到了el1_da，一定是因为x1寄存器中的地址为空。
 左键选中某条命令再右键点击View Info可以看到更多的信息包括源文件路径：
 \home\gonghj\project\mtk8195\kernel-4.19\arch\arm64\lib\strcmp.S
 找到源文件的第125行附近：

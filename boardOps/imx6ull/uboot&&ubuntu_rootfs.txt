@@ -1,0 +1,245 @@
+=> printenv
+baudrate=115200
+board_name=EVK
+board_rev=14X14
+boot_fdt=try
+bootcmd=run findfdt;mmc dev ${mmcdev};mmc dev ${mmcdev}; if mmc rescan; then if run loadbootscript; then run bootscript; else if run loadimage; then run mmcboot; else run netboot; fi; fi; else run netboot; fi
+bootcmd_mfg=run mfgtool_args;bootz ${loadaddr} ${initrd_addr} ${fdt_addr};
+bootdelay=1
+bootscript=echo Running bootscript from mmc ...; source
+console=ttymxc0
+ethact=FEC1
+ethprime=FEC
+fdt_addr=0x83000000
+fdt_file=imx6ull-14x14-emmc-4.3-480x272-c.dtb
+fdt_high=0xffffffff
+findfdt=if test $fdt_file = undefined; then if test $board_name = EVK && test $board_rev = 9X9; then setenv fdt_file imx6ull-9x9-evk.dtb; fi; if test $board_name = EVK && test $board_rev = 14X14; then setenv fdt_file imx6ull-14x14-evk.dtb; fi; if test $fdt_file = undefined; then echo WARNING: Could not determine dtb to use; fi; fi;
+image=zImage
+initrd_addr=0x83800000
+initrd_high=0xffffffff
+ip_dyn=yes
+loadaddr=0x80800000
+loadbootscript=fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${script};
+loadfdt=fatload mmc ${mmcdev}:${mmcpart} ${fdt_addr} ${fdt_file}
+loadimage=fatload mmc ${mmcdev}:${mmcpart} ${loadaddr} ${image}
+logo_file=alientek.bmp
+mfgtool_args=setenv bootargs console=${console},${baudrate} rdinit=/linuxrc g_mass_storage.stall=0 g_mass_storage.removable=1 g_mass_storage.file=/fat g_mass_storage.ro=1 g_mass_storage.idVendor=0x066F g_mass_storage.idProduct=0x37FF g_mass_storage.iSerialNumber="" clk_ignore_unused 
+mmcargs=setenv bootargs console=${console},${baudrate} root=${mmcroot}
+mmcautodetect=yes
+mmcboot=echo Booting from mmc ...; run mmcargs; if test ${boot_fdt} = yes || test ${boot_fdt} = try; then if run loadfdt; then bootz ${loadaddr} - ${fdt_addr}; else if test ${boot_fdt} = try; then bootz; else echo WARN: Cannot load the DT; fi; fi; else bootz; fi;
+mmcdev=1
+mmcpart=1
+mmcroot=/dev/mmcblk1p2 rootwait rw
+netargs=setenv bootargs console=${console},${baudrate} root=/dev/nfs ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp
+netboot=echo Booting from net ...; run netargs; if test ${ip_dyn} = yes; then setenv get_cmd dhcp; else setenv get_cmd tftp; fi; ${get_cmd} ${image}; if test ${boot_fdt} = yes || test ${boot_fdt} = try; then if ${get_cmd} ${fdt_addr} ${fdt_file}; then bootz ${loadaddr} - ${fdt_addr}; else if test ${boot_fdt} = try; then bootz; else echo WARN: Cannot load the DT; fi; fi; else bootz; fi;
+panel=ATK-LCD-4.3-480x272
+script=boot.scr
+splashimage=0x88000000
+splashpos=m,m
+
+Environment size: 2536/8188 bytes
+=> 
+
+192.168.106.130
+
+mount -t nfs -o nolock,nfsvers=3,vers=3 192.168.106.130:/root /mnt/nfs
+nfs 0x80800000 192.168.106.130:/root/project2/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/build/arch/arm/boot/zImage
+nfs 0x83000000 192.168.106.130:/root/project2/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/build/arch/arm/boot/dts/imx6ull-alientek-emmc.dtb
+nfsroot=${serverip}:/root rw
+
+
+
+bootcmd如下
+run 
+findfdt;
+mmc dev ${mmcdev};mmc dev ${mmcdev};
+if mmc rescan;
+then if run loadbootscript;
+     then run bootscript;
+     else if run loadimage;
+          then run mmcboot;
+          else run netboot;
+          fi;
+     fi;
+else run netboot;
+fi
+
+
+netargs=setenv bootargs
+
+ console=${console},${baudrate} root=/dev/nfs ip=dhcp nfsroot=${serverip}:${nfsroot},v3,tcp
+
+
+netboot=echo Booting from net ...; run netargs;
+ if test ${ip_dyn} = yes;
+ then
+	 setenv get_cmd dhcp;
+else 
+	setenv get_cmd tftp;
+ fi;
+ ${get_cmd} ${image};
+ if test ${boot_fdt} = yes || test ${boot_fdt} = try;
+ then 
+	if ${get_cmd} ${fdt_addr} ${fdt_file};
+ 	then 
+		bootz ${loadaddr} - ${fdt_addr};
+ 	else if test ${boot_fdt} = try;
+ 	       then 
+		bootz;
+ 	       else 
+		echo WARN: Cannot load the DT;
+ 	       fi;
+ 	fi;
+ else 
+	bootz;
+ fi;
+
+noinitrd console=ttymxc0,115200  
+
+
+console=ttymxc0,115200 root=/dev/nfs nfsroot=192.168.106.130:/root/project2/rootfs,proto=tcp rw ip=192.168.137.130:192.168.106.130:192.168.137.1:255.255.255.0::eth0:off
+console=ttymxc0,115200 root=/dev/nfs nfsroot=192.168.106.130:/root/project2/rootfs,proto=tcp rw ip=dhcp
+
+make O=build install CONFIG_PREFIX=/root/project2/rootfs
+make O=build modules_install INSTALL_MOD_PATH=/root/project2/rootfs
+
+readelf -d busybox | grep NEEDED
+
+ld-linux.so.3     动态链接库
+libc.so.6        c库    
+libm.so.6        math库
+还有
+libpthread.so.0
+
+/opt/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi/arm-linux-gnueabi/lib
+
+/opt/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi/arm-linux-gnueabi/libc/lib   ->        rootfs/lib/
+/opt/gcc-linaro-7.5.0-2019.12-x86_64_arm-linux-gnueabi/arm-linux-gnueabi/libc/usr/lib    ->   rootfs/usr/lib/
+
+
+
+setenv get_zImage      'nfs ${kernel_download_phy_addr}                          ${serverip}:${nfs_zImage_path}'
+setenv get_dtb         'nfs ${dtb_download_phy_addr}                             ${serverip}:${nfs_dtb_path}'
+setenv get_initrd     'nfs ${initrd_download_phy_addr}                           ${serverip}:${nfs_initrd_path}'
+setenv start_kernel   'bootz  ${kernel_download_phy_addr}  -  ${dtb_download_phy_addr}'
+
+//////////////////////////////////修改config后不需要重新执行setenv bootcmd//////////////////////////////////////////////////
+//common config
+baudrate=115200
+bootdelay=1
+ethact=FEC1
+ethprime=FEC
+ethaddr=00:04:9f:04:d2:35
+setenv ipaddr 192.168.5.9
+setenv gatewayip 192.168.5.11
+setenv netmask 255.255.255.0
+setenv serverip  192.168.5.11
+
+setenv kernel_download_phy_addr      0x82000000            //起始偏移32MB
+setenv dtb_download_phy_addr         0x88000000            //起始偏移128MB
+
+setenv nfs_dtb_path   /home/ghj/develop/arm_linux/linux_alientek/build/arch/arm/boot/dts/imx-my.dtb
+setenv nfs_dtb_path   /home/ghj/develop/arm_linux/linux-5.10.45/build/arch/arm/boot/dts/imx-ghj.dtb
+
+setenv nfs_zImage_path             /home/ghj/develop/arm_linux/linux_alientek/build/arch/arm/boot/zImage
+setenv nfs_zImage_path             /home/ghj/develop/arm_linux/linux-5.10.45/build/arch/arm/boot/zImage
+
+//nfs as root
+setenv nfs_rootfs_path             /home/ghj/develop/arm_linux/rootfs/busyboxRootFs
+setenv nfs_rootfs_path             /home/ghj/develop/arm_linux/rootfs/ubuntuRootFs
+setenv bootcmd  'run  get_zImage;  run get_dtb; setenv bootargs console=ttymxc0,115200 root=/dev/nfs nfsroot=${serverip}:${nfs_rootfs_path},proto=tcp,nfsvers=3 rw ip=${ipaddr}:${serverip}:${gatewayip}:${netmask}::eth0:off; run start_kernel'
+
+
+//initrd as root
+setenv nfs_initrd_path               /home/ghj/develop/arm_linux/rootfs/initrd.img
+setenv initrd_download_phy_addr      0x8a000000            //起始偏移160MB
+setenv initrd_size                   131072            
+setenv ramdiskSize                   131072                  //定义/dev/ram0最大使用多少内存
+setenv bootcmd  'run get_zImage; run get_dtb; run get_initrd;setenv bootargs  console=ttymxc0,115200 initrd=${initrd_download_phy_addr},${initrd_size}  root=/dev/ram0 rw; run start_kernel'
+
+
+
+
+
+
+
+
+
+
+find . |cpio -o -c|gzip -c >../initrd.img
+
+
+http://blog.chinaunix.net/uid-22954220-id-4856490.html
+https://blog.csdn.net/yuntongsf/article/details/37607101
+
+
+
+mkdir rootfs
+tar zpxf bak/ubuntu-base-20.04.3-base-armhf.tar.gz -C rootfs
+apt install qemu-user-static
+cp /usr/bin/qemu-arm-static  rootfs/usr/bin/sources.list
+sed  -i  's^https://mirrors.ustc.edu.cn/ubuntu^http://mirrors.ustc.edu.cn/ubuntu-ports^g'   rootfs/etc/apt/sources.list
+cp /etc/resolv.conf                  rootfs/etc/resolv.conf
+
+vim /lib/systemd/system/ttymxc0.service  
+
+[Unit]
+Description=Serial Console Service
+
+[Service]
+ExecStart=/sbin/getty -L 115200 ttymxc0  vt102
+Restart=always
+ 
+[Install]
+WantedBy=multi-user.target
+
+https://blog.csdn.net/lqijlyy/article/details/83275301
+ln -s  /lib/systemd/system/getty@.service   /etc/systemd/system/getty.target.wants/getty@ttymxc0.service
+
+
+
+
+LC_ALL='zh_CN.UTF-8'
+LANG=”en_US.UTF-8″
+LANGUAGE=”en_US:en”
+LC_CTYPE=zh_CN.UTF-8
+
+
+
+ localedef -c -f UTF-8 -i zh_CN zh_CN.utf8  
+
+
+
+1.CPU读Cache时：
+
+●若hit，则CPU直接从Cache中读取数据即可。
+
+●若miss，有两种处理方式：
+
+   >Read through，即直接从内存中读取数据；
+
+   >Read allocate，先把数据读取到Cache中，再从Cache中读数据。
+
+2.CPU写Cache时：
+
+●若hit，有两种处理方式：
+
+    >Write through：把数据同时写到Cache和内存中；
+
+    >Write back：先把数据写到Cache中，再通过flush方式写入到内存中。
+
+●若miss，有两种处理方式：
+
+    >Write allocate：先把要写的数据载入到Cache中，写Cache，然后再通过flush方式写入到内存中；
+
+    >No write allocate：直接把要写的数据写入到内存中。
+
+
+
+[    6.022837] Sending DHCP requests ...., OK
+[   22.352612] IP-Config: Got DHCP answer from 192.168.175.254, my address is 192.168.175.131
+[   22.360340] IP-Config: Complete:
+[   22.362346]      device=eth0, hwaddr=00:04:9f:04:d2:35, ipaddr=192.168.175.131, mask=255.255.255.0, gw=192.168.175.2
+[   22.371835]      host=192.168.175.131, domain=localdomain, nis-domain=(none)
+[   22.377810]      bootserver=192.168.175.254, rootserver=192.168.175.130, rootpath=
+[   22.384163]      nameserver0=192.168.175.2
