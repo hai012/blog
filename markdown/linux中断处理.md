@@ -352,6 +352,8 @@ https://www.ktanx.com/blog/p/2456
 
 
 
+Linux内核在启动时会根据CPU数量开启一些线程，这些线程的名字都叫做ksoftirqd/n，其中n是一个整数，从0开始。有几个CPU，就会有几个ksoftirad/n线程
+
 
 
 **softirq**

@@ -111,27 +111,32 @@ on <trigger>
 
 此外安卓系统还提供了一些类似的shell命令，例如start、stop、setprop、chmod、chown、insmod、mkdir等等。
 
-
-
+## 1.3    Action的执行顺序与Class阶段设置的建议
 init.rc文件或其他rc文件中一般都有定义如下command用来启动属于该serviceclass的所有service：
-
 class_start core
-
 class_start main
-
 class_start default
-
 class_start late_start
-
 class_start charger
-
 class_start hal
-
 class_start early_hal
 
+在自定义service时，可以通过声明class xxx来指定service的启动阶段，那么这个启动阶段该如何选取呢？
+目前系统常用的class阶段按顺序执行的有，附带class设置建议：
+    early_hal （HALs required before storage encryption can get unlocked (FBE/FDE)）
+    hal （normal hal）
+    core （system core base service）
+    main （normal service）
+    late_start （the last boot class, wait for all system resource ready）
+其启动的时序与action的执行对应关系如下图
+
+![img](安卓rc启动脚本及系统属性.assets/watermark,type_ZHJvaWRzYW5zZmFsbGJhY2s,shadow_50,text_Q1NETiBAbGRjX-WQm-iOq-eskQ==,size_19,color_FFFFFF,t_70,g_se,x_16.png)
+
+*黄色框为不同的on \<trigger\>阶段，红色字体为在这个on \<trigger\>阶段执行class_start这个command来启动了那些service class集合。*
 
 
-## 1.3 rc文件之import
+
+## 1.4 rc文件之import
 
 rc文件中可以使用import关键字来引入其他rc文件，可以使用系统属性变量
 
@@ -146,7 +151,7 @@ import /init.${ro.hardware}.rc
 
 
 
-## 1.4 demo
+## 1.5 demo
 
 ```
 

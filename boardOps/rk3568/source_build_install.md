@@ -84,17 +84,23 @@ https://wiki.radxa.com/Rock3/hardware/rock3a-gpio
 
 J15
 pin1外                                    pin2中          pin3里                
-FSPI_CLK/FLASH_ALE   +     GND   +   SARADC_VIN0_KEY/RECOVERY
+FSPI_CLK/FLASH_ALE   +        GND        +   SARADC_VIN0_KEY/RECOVERY
 
 
 
 J4
-pin1                      pin2
+pin1                                       pin2
 eMMC_CLKOUT/FLASH_DQS     GND
 
 
 
 ### 5.1 boot devices  select
+
+将USB otg(中间那列蓝色接口上面的那个口)设置为slave模式(底下开关偏向黑色USB口那边而不是网口那边)，然后接上电，注意电脑上虚拟机要选择把USB设备接入主机。
+
+
+
+
 
 选择启动的存储器:
 1.spi nand flash boot  全部悬空
@@ -176,5 +182,9 @@ https://cloud.tencent.com/developer/article/1571935
 
 
 
+## 7. GPIO
 
+   https://wiki.radxa.com/Rock3/hardware/rock3a-gpio
+
+![image-20220812150655257](source_build_install.assets/image-20220812150655257.png)
 

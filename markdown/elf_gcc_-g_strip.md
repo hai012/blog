@@ -1,3 +1,9 @@
+
+
+gcc -Og -g
+
+
+
 gcc不加-g进行编译出可执行elf，然后再使用strip可执行elf时默认会把elf文件中的如下两个段干掉:
   [26] .symtab
   [27] .strtab
@@ -20,7 +26,6 @@ debug_xxx段： 编译时加入-g选项生成的调试信息所在段
 dynamic  动态链接信息
 symtab  符号表(包含dynamic )
 strtab    保存elf文件中一些名字的字符串，例如段名
-
 
 
 
