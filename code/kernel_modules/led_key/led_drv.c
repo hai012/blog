@@ -170,7 +170,7 @@ static int led_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id device_matchs[] = {
-	{ .compatible = "zte,gpio_led" },
+	{ .compatible = "zte,gpio_led", },
 	{},
 };
 

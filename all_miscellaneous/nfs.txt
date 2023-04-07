@@ -1,11 +1,14 @@
+mount -t nfs -o nolock,soft,timeo=1 10.0.2.2:/home/haijie.gong  /mnt/nfs
+
+
 以ghj身份创建/home/ghj/nfsShared文件夹
 
 安装：
 apt install nfs-kernel-server
 
 配置权限vim  /etc/exports
-/home/ghj/nfsShared *(rw,async,insecure,no_subtree,no_subtree_check,all_squash,anonuid=1000,anongid=1000)
-/home/ghj    *(insecure,rw,sync,no_subtree_check,all_squash,root_squash,anonuid=1000,anongid=1000)
+/home/ghj/nfsShared *(rw,sync,insecure, no_subtree_check,all_squash,anonuid=1000,anongid=1000)
+/home/ghj                 *(rw,sync,insecure, no_subtree_check,all_squash,anonuid=1000,anongid=1000)
 
 sudo exportfs -r
 nfs共涉及6个端口：

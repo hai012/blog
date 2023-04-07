@@ -1,0 +1,71 @@
+高通平台Android11(AndroidR)系统编译总结
+https://blog.csdn.net/superlee1125/article/details/114038293
+
+
+关闭AVB验证，启动流程
+http://www.360doc.com/content/21/1213/10/78068035_1008472234.shtml
+vbmeta.img校验boot.img vendor.img 
+vbmeta_system.img校验system.img system_ext.img product.img
+
+ftrace 宋宝华
+https://blog.csdn.net/juS3Ve/article/details/79157872?spm=1001.2101.3001.6661.1&utm_medium=distribute.pc_relevant_t0.none-task-blog-2%7Edefault%7ECTRLIST%7ERate-1-79157872-blog-81662666.pc_relevant_aa_2&depth_1-utm_source=distribute.pc_relevant_t0.none-task-blog-2%7Edefault%7ECTRLIST%7ERate-1-79157872-blog-81662666.pc_relevant_aa_2&utm_relevant_index=1
+
+
+基于AOSP源码为Pixel3编译boot.img
+https://www.pudn.com/news/62c7c2a95f75f3409e88c235.html
+
+
+fastboot adb
+https://blog.csdn.net/u011283906/article/details/126808759
+(禁用/启用)联发科AVB验证
+fastboot --disable-verification flash vbmeta             C:\Users\1\desktop\vbmeta.img
+fastboot --disable-verification flash vbmeta_system C:\Users\1\desktop\vbmeta_system.img
+高通重启到9008模式
+fastboot oem edl
+
+
+cache.img
+cust.img
+metadata.img
+misc.img(out目录下没有，但机器emmc里有)
+recovery.img
+super.img
+userdata.img
+vbmeta.img
+vbmeta_system.img
+abl.elf
+boot.img
+dtbo.img
+dtb.img
+ramdisk.img
+vendor.img
+
+
+安卓8  treble  A/B
+安卓10  system-as-root
+
+
+安卓10及其以上基本是system-as-root+super
+安卓8以上基本是treble
+A/B和no A/B跟版本关系不大，取决于产品价位，毕竟几乎额外占了一倍系统镜像存储
+
+
+  no A/B      &&     no super 
+    preloader   bootloader(lk/uboot)   boot     dtbo              |system      vendor      product       system_ext      odm      |   vbmeta      vbmeta_system        misc  userdata   recovery  
+
+
+
+  A/B      &&     no super 
+   preloader_a   bootloader_a(lk/uboot)   boot_a     dtbo_a  |system_a   vendor_a   product_a   system_ext_a   odm_a   |  vbmeta_a   vbmeta_system_a     misc  userdata
+   preloader_b   bootloader_b(lk/uboot)   boot_b    dtbo_b  |system_b   vendor_b   product_b   system_ext_b  odm_b   |  vbmeta_b   vbmeta_system_b 
+
+
+
+  no A/B      &&     super 
+    preloader       bootloader(lk/uboot)      boot         dtbo   |                         super                                                      |  vbmeta      vbmeta_system        misc  userdata  recovery  cache  
+
+
+
+ A/B      &&     super 
+   preloader_a   bootloader_a(lk/uboot)   boot_a     dtbo_a |                         super_a                                                    | vbmeta_a   vbmeta_system_a     misc  userdata
+   preloader_b   bootloader_b(lk/uboot)   boot_b     dtbo_b |                         super_b                                                   | vbmeta_b   vbmeta_system_b

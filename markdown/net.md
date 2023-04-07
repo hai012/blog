@@ -1,4 +1,441 @@
-# 概念
+# 一.  概念总结
+
+- **数据接收(ingress)：**
+
+- - 数据包接收
+
+  - - 过滤MAC地址（可以通过打开混杂模式而去掉）
+
+    - 检查FCS(Frame Check Sequence)，一种以太层的checksum，如果checksum不对会被直接丢弃，OS不感知
+
+    - 将数据包存在系统内存中（使用DMA） ——地址由驱动程序先前分配好，然后告诉网卡这些内存的位置。网卡使用这些内存来保存收进来的数据包。
+
+    - 网卡触发中断，告诉CPU我已经把数据包准备好了
+
+    - CPU停下正在做的事情，并进行中断处理。由于我们不希望CPU在中断模式下呆太长时间，因为这样可能会打断CPU做一些非常重要的事情("top half")，所以在top half，我们只是让CPU做一些非常重要的事情，然后告诉网卡“shut up”，然后schedule "bottom half" later.
+
+    - 当"bottom half"被调度到，NIC会告诉它之前数据被存储到哪里了，然后driver会分配一个sk_buff（这个结构体保存了数据包中的元数据），然后将元数据填写好：
+
+    - - protocol（以太网类型, e.g. IP）
+      - receiving interface
+      - packet type, ... 并将MAC头指针设置好（skbuff里面mac），删除(pull)掉Ethernet header(通过移动指针)。并将skb传给协议栈。
+
+    - netif_receive_skb将数据从驱动中取出来。它一开始会看到data指针指向的是IP Header的起始位置，mac指针记录了mac头:
+
+    - - 从以太头中移除vlan tag，将它放入skb数据结构中（有一些更智能的网卡通过硬件完成这件事）。
+      - 设置好网络层头（nh指针记录）。
+      - 将skb克隆给tap（tap是内核里面的探针，可以用来读取任何内核接收到的数据包，e.g. tcpdump make use of it）
+      - 调用tc ingress (packet can be redirected，数据包可能被tc拿走)
+      - 检查skb看是否是vlan tagged? 如果是vlan tagged的，而且内核中存在一个vlan设备，则将数据包重定向至对应的网卡，数据处理结束。
+      - 这个网卡是否有一个Master? Let it steal the packet("rx_handler") and processing ends.
+      - 调用L3协议的handler，这里以IPv4举例。
+
+    - ip_rcv是IPv4的接收函数：
+
+    - - 丢弃MAC地址非本机的数据包（在这里丢弃的原因是因为bridge可能对各种封包都感兴趣）
+
+      - 移除(pull) IP头，
+
+      - 验证 IP header checksum
+
+      - 设置传输层头指针(h)。
+
+      - 调用netfilter（PRE_ROUTING）
+
+      - 如果数据包没被丢弃，则开始找路由（这个数据包是给我的还是给另外的主机？）
+
+      - 调用route input action (dst_input):
+
+      - - forwarding 还是 local delivery？
+
+    - 如果是本机进行处理，则调用ip_local_deliver：
+
+    - - 将分片的数据包组合起来
+      - 调用netfilter (查询LOCAL_IN netfilter chain)
+      - 调用L4层协议的handler, e.g. TCP
+
+    - TCP 接收函数(tcp_v4_rcv)：
+
+    - - 移除(pull)TCP头
+      - 验证TCP checksum
+      - 查找这个封包对应哪个应用（哪个TCP socket），如果找不到，则将数据包丢弃
+      - 处理TCP状态机
+      - 将封包放入对应socket的接收队列里面
+      - 向应用发送信号，告诉它数据已经可用了(for poll)
+
+    - 在应用的角度，应用调用了socket read:
+
+    - - 从对应的socket receive queue里面dequeue
+      - 将数据拷贝到应用提供的缓冲区中(可能拷贝多个packet)
+      - 释放skb
+
+- **数据发送(egress)**
+
+- - 应用调用了socket write:
+
+  - - socket用来发送数据的函数为sendmsg，e.g. TCP sendmsg
+
+  - tcp_sendmsg函数
+
+  - - 分配创建sk_buff
+    - 将skb加入到socket写队列中
+    - 处理写队列
+
+  - tcp_write_xmit -> tcp_transmit_skb
+
+  - - 根据socket中的信息构建TCP头(source port, dest port, ...)
+    - 将传输层头添加(push)至skb中(填写好)
+    - 设置好传输层指针h
+    - 调用L3层协议的handler, e.g. IPv4（这是通过socket指定的）
+
+  - 对于IP层的消息发送函数ip_queue_xmit:
+
+  - - 找路由，用于确定要从哪个网卡发出（或者返回"hosts unreachable"）
+
+    - 根据socket中的信息和路由查询结果构建好IP头
+
+    - 将网络层头添加(push)至skb中
+
+    - 设置好网络层指针nh
+
+    - 调用Netfilter（LOCAL_OUT）
+
+    - 调用route output action (dst_output):
+
+    - - 将数据发出/将数据包装到tunnel中/丢掉
+      - allow special routes
+
+    - IP发送函数(ip_output):
+
+    - - 设置skb元数据，如 Protocol, network interface ..
+
+      - 调用netfilter (POST_ROUTING)
+
+      - 如果需要，进行IP分片（数据包大小超过链路层能接受的MTU）
+
+      - 进行neighbor lookup(L2层地址解析)
+
+      - 将链路层头添加(push)至skb中
+
+      - - 通过调用neighbor output函数
+        - 或者使用缓存的L2头
+
+      - 调用L2层通用的发送函数
+
+    - 邻居output函数介绍(neigh_resolve_output)：
+
+    - - 执行ARP状态机
+
+      - 如果没有ARP reply，则先将skb enqueue到一个暂存队列里面，等待ARP reply到达。当ARP reply到达后：
+
+      - - 利用rely中的MAC地址构建L2 header
+        - 将header push到skb中
+        - 缓存这个header
+        - 将这个skb dequeue，继续进行后续处理
+
+    - L2层通用发送函数(dev_queue_xmit)：
+
+    - - 设置链路层头（mac）
+      - 调用tc egress (packet can be redirected)
+      - 将数据包enqueue到qdisc中(queue discipline), 掌握一个封包队列，在需要的时候将封包发送到网卡。
+
+    - qdisc使用__qdisc_run来运行(一直循环)：
+
+    - - 如果发现网卡的buffer没满，则dequeue skb
+
+      - 提前处理skb（validate_xmit_skb），在软件层模拟硬件做不了的事情：
+
+      - - 基于元数据添加一个VLAN tag
+        - 计算checksum（TCP checksum在这里计算）
+        - etc
+
+      - 调用网卡的发包函数
+
+    - 网卡发送函数（ndo_start_xmit）
+
+    - - 硬件队列是否满了？
+
+      - - 这不应该发生，如果发生了，那就让qdisc停止发送，然后让它重新将skb入队
+        - 理论上qdisc会及时停止数据发送，因此不会出现网卡硬件队列满的情况
+
+      - Last free place in hardware queue?
+
+      - - stop the qdisc queue
+
+      - DMA映射封包数据，让网卡可以直接从内存中读数据
+
+      - 向skb元数据中添加一些detail信息
+
+      - 让NIC将数据发送出去
+
+    - 网卡
+
+    - - 计算FCS
+      - 将数据包发送至网线中
+      - 触发"I'm done"中断
+
+    - 网卡驱动的中断处理函数
+
+    - - 释放skb
+      - （由于释放了，queue中又有新的空间)，启动qdisc queue
+
+  - **性能提升**
+
+  - - 智能校验和
+
+    - - a sum of 16bit words (ones-complement)
+
+      - change of data with already computed checksum:
+
+      - - just add the difference
+
+      - on ingress:
+
+      - - "rx checksum offloading"
+        - NIC calculates checksum of the packet
+        - and gives us the checksum
+        - or compares it with the packet's checksum
+        - we don't need to read the data!
+
+      - on egress:
+
+      - - "tx checksum offloading"
+        - we tell the NIC：from where to checksum the packet, where to add the checksum to
+        - or the NIC understands the packet and calculates the checksum
+        - 如果都不支持，则使用software checksum, remember validate_xmit_skb
+
+    - 现代网卡支持多硬件队列
+
+    - - on egress:
+
+      - - hw queues are bound to qdisc queues
+        - queues can be stopped separately
+        - allows prioritization
+
+      - on ingress:
+
+      - - packet for different sockets go to different queues
+        - allows CPU pinning(将不同的queue固定到不同的CPU核心上)
+
+    - "NAPI"
+
+    - - interrrupt handling is costly
+      - storm of ingressing packets -> interrupt strom
+      - 当接收到第一个数据包的时候，关闭接收中断，然后调度一个worker，用来周期性地polling，每次去网卡驱动读一些数据包。如果发现没数据包可读了，再将rx interrupt打开。
+      - NAPI runs per hw queue
+
+    - GRO ( generic recceive offloading )
+
+    - - 相同的数据包被进行相同地处理。
+
+      - 在同一条流中的数据包也是一样。
+
+      - 为什么不将他们组合成一个superpacket
+
+      - on NAPI receive, combine packets into a single skb
+
+      - - remember, different streams goto different queues
+        - (Not really, we still need to check)
+
+      - keep enough information to split the packet back
+
+      - only single traversal through the network stack
+
+    - GSO (generic segmentation offloading)
+
+    - - application sends more data than fits into a packet
+
+      - let's split the data into packets as late as possible
+
+      - the egress complement to GRO
+
+      - - on write, create a GSO packet
+        - on forward path, GRO becomes GSO
+
+      - If the NIC supports segmentation(TSO), don't split at all!
+
+      - If it doesn't, split in software
+
+      - - remember validate_xmit_skb?
+
+    - optimized packet memory layout (scatter-gatter)
+
+    - socket lookup before full decode
+
+    - packet hashes
+
+    - zero copy
+
+    - partial GSO
+
+    - ...
+
+
+
+
+
+
+
+## L2帧格式
+1 Ethernet帧格式的发展
+(from https://blog.csdn.net/bluelingt/article/details/48970441 )
+
+1980 DEC,Intel,Xerox制订了Ethernet I的标准
+
+1982 DEC,Intel,Xerox又制订了Ehternet II的标准
+
+1982 IEEE开始研究Ethernet的国际标准802.3
+
+1983 迫不及待的Novell基于IEEE的802.3的原始版开发了专用的Ethernet帧格式
+
+1985 IEEE推出IEEE 802.3规范
+
+后来为解决EthernetII与802.3帧格式的兼容问题推出折衷的Ethernet SNAP格式
+
+2 不同帧格式
+2.1 Ethernet V2(ARPA)
+clip_image001
+
+![img](net.assets/2704972-20220211095404395-621247372.png)
+
+2.2 RAW 802.3：（NOVELL Ethernet 802.3）
+clip_image002
+
+![img](net.assets/2704972-20220211095405112-1134919411.png)
+
+2.3 IEEE 802.3/802.2 LLC
+clip_image003
+
+![img](net.assets/2704972-20220211095405709-569124411.png)
+
+2.4 IEEE 802.3/802.2 SNAP
+clip_image004
+
+![img](net.assets/2704972-20220211095406245-447748905.png)
+
+3 如何区分
+(from https://blog.csdn.net/bluelingt/article/details/48970441 )
+
+Ethernet中存在这四种Frame那些网络设备又是如何识别的呢?
+
+1、如果 source mac后的2 bytes的值大于1500 则此Frame为 Ethernet V2(ARPA) 格式的Frame。否则如下判断
+
+2、如果len 字段后面的两bytes 为0xFFFF，则为 RAW 802.3：（NOVELL Ethernet 802.3） 格式的Frame。否则如下判断
+
+3、如果len 字段后面的两bytes为0xAAAA则为 IEEE 802.3/802.2 SNAP格式的Frame 。否则如下判断
+
+4、为Ethernet 802.3/802.2 LLC格式的Frame。
+
+4 参考文档
+Ethernet_II帧和802.3_Ethernet帧格式比较
+
+https://blog.csdn.net/bluelingt/article/details/48970441
+
+Ethernet和802.3的区别及历史
+
+https://www.cnblogs.com/smartjourneys/articles/8124490.html
+
+
+
+帧最后的FCS是针对**目标MAC地址起始字节**到**数据结束字节**计算CRC
+
+
+
+## L3 帧格式
+
+
+
+![image-20230227185445973](net.assets/image-20230227185445973.png)
+
+header checksum只存放针对IP头进行的校验和，不包括IP包的payload。一般Options、Padding不存在，因此：
+
+version=4   (即IPv4)
+
+header length = 5 （即IP header 占 5个 32 bit）
+
+Type of Service=0
+
+Total Length=IP header + payload整个数据报的长度（以字节为单位）。最大长度为65535字节.占16比特.
+
+header checksum只针对IP header计算，不包括IP payload。
+
+Destination IP Address后面直接跟着L4 header。
+
+
+
+## L4帧格式
+
+TCP：
+
+![在这里插入图片描述](net.assets/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ4MjIzOQ==,size_16,color_FFFFFF,t_70.png)
+
+TCP header里的校验和针对TCP伪头部、TCP头部、TCP数据三个部分一起计算，具体参考下文：
+
+https://blog.csdn.net/gufuguang/article/details/121229086
+
+
+
+TCP校验和相关标志：
+
+net_device->feature
+
+| NETIF_F_NO_CSUM: No need to use L4 checksum, it used for loopback device.
+
+| NETIF_F_IP_CSUM: the device can compute L4 checksum in hardware, but only for TCP and UDP over IPv4.
+
+| NETIF_F_HW_CSUM: the device can compute the L4 checksum in hardware for any protocol.
+
+
+
+For receive path:
+
+skb->csum may hold the L4 checksum(when skb->ip_summed == CHECKSUM_COMPLETE, this filed hold the checksum provided by hardware).
+
+skb->ip_summed: indicate the checksum status.
+
+CHECKSUM_NONE: the checksum in csum is not valid, this can be due to:
+
+1. device doesn't provide hardware checksumming.
+
+2. hardware found the packet is corrupted, in normal case, it should drop this packet and not discard this packet, but the driver may want the kernel to re-check it again,so it set this flag.
+
+  IMPORTANT: if the packet is going to be forwarded, the router should not discard it dure to wrong L4 checksum (a route is not supposed to check L4 checksum). but the receiver need to check it.
+
+3. the checksum need be recomputed nd reverified.
+
+CHECKSUM_HW: the NIC hs computed the checksum on the L4 header and payload. and has copied it into the skb->csum field. The software needs to add checksum on the pseduo-heder to generate the result checksum.
+
+CHECHSUM_UNNECESSARY: the NIC has computed and verified the checksum. software doesn't need to verify the checksum again.
+
+
+
+For TX path:
+
+ skb->csum: tell hardware to put the checksum at this offset of the packet.
+
+skb->ip_summed, CHECKSUM_NONE: the software has processed the checksum, hardware doesn't need to do anything.
+
+CHECKSUM_HW: software computed the checksum of the pseudo-header. hardware need to adding this checksum to L4 header and payload.
+
+refer:tcp_v4_checksum_init for rx, tcp_v4_send_check for tx in kernel code.
+
+
+
+
+
+## 网卡设备DMA模型
+
+
+
+
+
+https://blog.csdn.net/mabin2005/article/details/119728674
+
+
+
+
+
+## SKB
 
 
 
@@ -34,7 +471,7 @@ skb_reserve只允许在刚分配后使用，把data和tail同时往end方向移�
 
 
 
-
+## 分段/分片
 
 对于NIC，在中断上半部处理函数中，需要读取硬件接收的内容，构造sk_buff后再将其作为参数调用netif_rx()，netif_rx会pending softirq, 软中断在处理时间接调用process_backlog，process_backlog再调用\_\_netif_receive_skb将数据包放入网络协议栈
 
@@ -110,16 +547,14 @@ https://blog.csdn.net/Rong_Toa/article/details/108748689
 | UFO         | 传输段               | UDP            | 网卡硬件                                     | udp-fragmentation-offload    | ufo                         | linux [2.6.15](http://kernelnewbies.org/Linux_2_6_15) 引入 （2006）**网卡普遍不支持** |
 | GSO         | 传输段               | TCP/UDP        | 网卡硬件或者 进入网卡驱动(调用即xmit)之前    | generic-segmentation-offload | gso                         | GSO/TCP: Linux [2.6.18](http://kernelnewbies.org/Linux_2_6_18) 中引入（2006）GSO/UDP: [linux 3.16](http://kernelnewbies.org/Linux_3.16) (2014)，推荐使用 |
 |             |                      |                |                                              |                              |                             |                                                              |
-| LRO         | 接收段               | TCP            | 网卡硬件                                     | large-receive-offload        | lro                         | Linux 内核 [2.6.24](http://kernelnewbies.org/Linux_2_6_24#head-c24461fecdf79d8181a118cafcb1657a32ff7831) 引入（2008）网卡普遍支持，不推荐使用。 |
+| LRO         | 接收段               | TCP            | 网卡硬件                                     | large-receive-offload        | lro                         | Linux 内核 [2.6.24](http://kernelnewbies.org/Linux_2_6_24#head-c24461fecdf79d8181a118cafcb1657a32ff7831) 引入（2008）网卡普遍支持，不推荐使用。无法做做路由转发。 |
 | GRO         | 接收段               | TCP            | 网卡硬件 或者 离开网卡驱动进入网络协议栈之前 | generic-receive-offload      | gro                         | Linux 内核 [2.6.18](http://kernelnewbies.org/Linux_2_6_18) 引入(2006)网卡普遍支持，推荐使用。 |
 
 
 
-
+## TCP连接建立/断开过程
 
 ![在这里插入图片描述](net.assets/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3dlaXhpbl80NDQ4MjIzOQ==,size_16,color_FFFFFF,t_70.png)
-
-
 
 
 
@@ -129,17 +564,13 @@ https://blog.csdn.net/Rong_Toa/article/details/108748689
 
 
 
-
-
-
-
-
-
 https://my.oschina.net/xinxingegeya/blog/485643
 
 
 
-# [TCP Nagle 算法 && 延迟确认机制](https://my.oschina.net/xinxingegeya/blog/485643)
+
+
+## [TCP Nagle 算法 && 延迟确认机制](https://my.oschina.net/xinxingegeya/blog/485643)
 
 https://www.oschina.net/group/backend)
 
@@ -149,7 +580,7 @@ TCP Nagle 算法 && 延迟确认机制
 
 
 
-# TCP Nagle 算法
+### TCP Nagle 算法
 
 [http://baike.baidu.com/view/2468335.htm](https://www.oschina.net/action/GoToLink?url=http%3A%2F%2Fbaike.baidu.com%2Fview%2F2468335.htm)
 
@@ -175,7 +606,7 @@ TCP Nagle 算法 && 延迟确认机制
 
 
 
-# Nagle 算法的应用场景
+### Nagle 算法的应用场景
 
 在 Nagle 算法的 Wiki 主页，有这么一段话：
 
@@ -193,7 +624,7 @@ TCP Nagle 算法 && 延迟确认机制
 
 
 
-# TCP_NODELAY 套接字选项
+### TCP_NODELAY 套接字选项
 
 默认情况下，发送数据采用 Negle 算法。这样虽然提高了网络吞吐量，但是实时性却降低了，在一些交互性很强的应用程序来说是不允许的，
 
@@ -201,7 +632,7 @@ TCP Nagle 算法 && 延迟确认机制
 
 
 
-## [TCP_NODELAY 和 TCP_CORK主要区别](https://www.cnblogs.com/biyeymyhjob/p/4670502.html)
+### [TCP_NODELAY 和 TCP_CORK主要区别](https://www.cnblogs.com/biyeymyhjob/p/4670502.html)
 
 一句话总结：
 
@@ -318,7 +749,7 @@ struct tcp_sock.gso_segs>1     说明支持gso, 尺寸为mss的gso_segs倍
 
 
 
-# 延迟确认机制（TCP delayed acknowledgment） 
+### 延迟确认机制（TCP delayed acknowledgment） 
 
 wiki 的解释 [https://en.wikipedia.org/wiki/TCP_delayed_acknowledgment](https://www.oschina.net/action/GoToLink?url=https%3A%2F%2Fen.wikipedia.org%2Fwiki%2FTCP_delayed_acknowledgment)
 
@@ -332,7 +763,7 @@ wiki 的解释 [https://en.wikipedia.org/wiki/TCP_delayed_acknowledgment](https:
 
 
 
-# 当 Nagle 算法遇到 Delayed ACK
+### 当 Nagle 算法遇到 Delayed ACK
 
 在一个有数据传输的 TCP 连接中，如果只有数据发送方启用 Nagle 算法，在其连续发送多个小报文时，Nagle 算法机制会减少网络中的小报文数量。这就意味着，同样传输相同大小的应用数据，在网络上的报文个数却不同。 
 
@@ -373,308 +804,7 @@ https://my.oschina.net/xinxingegeya/blog/485650
 
 
 
-# NIC
-
-## 接收
-### 代码实现
-
-#### 中断上半部
-
-#### 中断下半部
-
-## 发送
-### 代码实现
-
-#### 中断上半部
-
-#### 中断下半部
-
-
-
-
-
-
-
-
-# NAPI
-
-## 接收
-
-### 流程原理
-
-参考stm32 ethernet DMA机制
-
-DMA描述符中的Control/Status是flag,Buffer Count是DMA控制器传输的目标内存块尺寸，Buffer Address指针指向了DMA控制器传输的目标内存首地址，DMA控制器可以根据这些flag标记判断是否有空节点。
-
-![img](net.assets/v2-696e07d0ebb13efe91cc240d28add341_720w.jpg)
-
-ringbuffer = DMA描述符链表 + DMA描述符中Buffer Address指向的内存块。
-
-当网卡收到数据后触发接收事件，DMA控制器处理网卡接收事件时，首先遍历在ringbuffer中的DMA描述符，找到一个空的，然后将数据传输到空的DMA描述符的Buffer Address指针指向的内存地址。
-
-可能DMA控制器处理一次网卡接收事件时会用掉好几个空的DMA描述符，数据放到了好几块非连续的内存块。
-
-DMA控制器处理完网卡接收事件后向中断控制器发送中断请求，然后中断控制器打断CPU让其去处理DMA接收完成硬件中断，硬件中断唤醒软中断，软中断调用poll。
-
-poll函数记录下指向接收数据的旧的Buffer Address，然后开辟一块新的内存并把DMA描述符中Buffer Address指向新开辟的内存，修改flag标记为空且将归属权交给DMA控制器，判断一下如果DMA停止了且网卡还有接收的数据需要传输则重新启动DMA。接着创建sk_buff,使用指向接收数据的旧的Buffer Addres来初始化sk_buff里面的一些指针字段，掐掉数据链路层的头部后调用\_\_netif_receive_skb把sk_buff丢到网络协议栈。
-
-当网络协议栈处理完sk_buff后释放时顺带释放指向接收数据的旧的Buffer Address。
-
-整个流程避免了使用CPU从网卡拷贝接收数据到内存。
-
-
-
-注意，一个sk_buff中传输的数据可以由多块不连续的内存块组成。一次poll函数可以调用多次\_\_netif_receive_skb往网络协议栈丢入sk_buff，\_\_netif_receive_skb每次只处理一个sk_buff，即该sk_buff代表一个ip数据包。
-
-
-
-
-
-
-
-
-### 代码实现
-#### 中断上半部
-
-对于NAPI，中断上半部不需要构建sk_buff，首先保存先前的中断状态并禁止当前单个处理器的所有硬件中断，接着调用\_\_\_\_napi_schedule把struct napi_struct结构体放入当前CPU私有数据链表中，然后调用\_\_raise_softirq_irqoff通知当前CPU的ksoftirq线程可以处理软中断了，通知完成后(不需要等ksoftirq线程处理完成)一路返回并恢复先前的中断状态。
-
-
-
-![image-20220816100914722](net.assets/image-20220816100914722.png)
-
-
-
-![image-20220816100707075](net.assets/image-20220816100707075.png)
-
-
-
-local_irq_save(flags);//保存先前中断状态，并禁止当前单个处理器的所有中断
-
-local_irq_restore(flags);//恢复当前单个处理器的中断状态
-
-
-
-![image-20220816100618864](net.assets/image-20220816100618864.png)
-
-
-
-![image-20220816103656815](net.assets/image-20220816103656815.png)
-
-
-
-#### 中断下半部
-
-前面在中断上半部\_\_\_\_napi_schedule中调用\_\_raise_softirq_irqoff(NET_RX_SOFTIRQ)来唤醒ksoftirq进行处理，接下来看它是如何处理的，在内核启动时调用了net_dev_init，在这个里面注册了net_rx_action处理函数：
-
-kernel-4.19/net/core/dev.c
-
-```c
-9817  static int __init net_dev_init(void)
-9818  {
-......
-9883  	open_softirq(NET_TX_SOFTIRQ, net_tx_action);
-9884  	open_softirq(NET_RX_SOFTIRQ, net_rx_action);
-......
-9892  }
-```
-
-
-
-- SEC  秒
-- PER  每
-- NSEC 纳秒
-- MSEC 毫秒
-- USEC 微秒
-
-```cpp
-#define NSEC_PER_SEC 1000000000ull     多少纳秒 = 1秒            1秒 = 10亿纳秒              
-#define NSEC_PER_MSEC 1000000ull       多少纳秒 = 1毫秒          1毫秒 = 100万纳秒
-#define USEC_PER_SEC 1000000ull        多少微秒 = 1秒            1秒 = 100万微秒   
-#define NSEC_PER_USEC 1000ull          多少纳秒 = 1微秒           1微秒 = 1000 纳秒
-```
-
-
-
-
-
-kernel-4.19/net/core/dev.c
-
-```c
-3936  int netdev_budget __read_mostly = 300; //一次接收软中断最多处理300个数据包
-3937  /* Must be at least 2 jiffes to guarantee 1 jiffy timeout */   // 一次接收软中断最多持续 200万个 1/HZ 时间
-3938  unsigned int __read_mostly netdev_budget_usecs = 2 * USEC_PER_SEC / HZ;
-
-......
- 
-6272  static int napi_poll(struct napi_struct *n, struct list_head *repoll)
-6273  {
-6274  	void *have;
-6275  	int work, weight;
-6276  
-6277  	list_del_init(&n->poll_list);
-6278  
-6279  	have = netpoll_poll_lock(n);
-6280  
-6281  	weight = n->weight;//weight在netif_napi_add初始化napi_struct时指定，即一次最大能处理多少个数据包
-6282  
-6283  	/* This NAPI_STATE_SCHED test is for avoiding a race
-6284  	 * with netpoll's poll_napi().  Only the entity which
-6285  	 * obtains the lock and sees NAPI_STATE_SCHED set will
-6286  	 * actually make the ->poll() call.  Therefore we avoid
-6287  	 * accidentally calling ->poll() when NAPI is not scheduled.
-6288  	 */
-6289  	work = 0;
-6290  	if (test_bit(NAPI_STATE_SCHED, &n->state)) {
-6291  		struct softnet_data *sd = this_cpu_ptr(&softnet_data);
-6292  
-6293  		sd->current_napi = n;
-6294  		work = n->poll(n, weight);//回调struct napi_struct中的poll函数指针来进行处理，poll返回处理了多少个数据包
-6295  		trace_napi_poll(n, work, weight);
-6296  	}
-6297  
-6298  	WARN_ON_ONCE(work > weight);
-6299  
-6300  	if (likely(work < weight))       
-6301  		goto out_unlock;//收包数量小于配额，全部读完了就退出
-6302    //接下来的代码处理超过weight后还需要继续poll的情况
-6303  	/* Drivers must not modify the NAPI state if they
-6304  	 * consume the entire weight.  In such cases this code
-6305  	 * still "owns" the NAPI instance and therefore can
-6306  	 * move the instance around on the list at-will.
-6307  	 */
-6308  	if (unlikely(napi_disable_pending(n))) {
-6309  		napi_complete(n);
-6310  		goto out_unlock;
-6311  	}
-6312  
-6313  	if (n->gro_bitmask) {
-6314  		/* flush too old packets
-6315  		 * If HZ < 1000, flush all packets.
-6316  		 */
-6317  		napi_gro_flush(n, HZ >= 1000);
-6318  	}
-6319  
-6320  	/* Some drivers may have called napi_schedule
-6321  	 * prior to exhausting their budget.
-6322  	 */
-6323  	if (unlikely(!list_empty(&n->poll_list))) {
-6324  		pr_warn_once("%s: Budget exhausted after napi rescheduled\n",
-6325  			     n->dev ? n->dev->name : "backlog");
-6326  		goto out_unlock;
-6327  	}
-6328  
-6329  	list_add_tail(&n->poll_list, repoll);      //将超过weight后还需要继续poll的napi_struct挂到 repoll 链表上
-6330  
-6331  out_unlock:
-6332  	netpoll_poll_unlock(have);
-6333  
-6334  	return work;
-6335  }
-6336  //open_softirq(NET_RX_SOFTIRQ, net_rx_action)注册的软中断接收处理函数
-6337  static __latent_entropy void net_rx_action(struct softirq_action *h)
-6338  {
-6339  	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
-6340  	unsigned long time_limit = jiffies +
-6341  		usecs_to_jiffies(netdev_budget_usecs);  //记录超时时候的 jiffies
-6342  	int budget = netdev_budget;//记录本次软中断还能处理多少个包
-6343  	LIST_HEAD(list);//创建并初始化一个list链表头
-6344  	LIST_HEAD(repoll);
-6345  
-6346  	local_irq_disable();
-6347  	list_splice_init(&sd->poll_list, &list);//将当前cpu的待处理的napi_struct转移到list
-6348  	local_irq_enable();
-6349  
-6350  	for (;;) {//循环处理 list 中的每个节点，每个节点对应一次硬件接收中断，一次软中断可以会处理多次硬中断请求
-6351  		struct napi_struct *n;
-6352  
-6353  		if (list_empty(&list)) {
-6354  			if (!sd_has_rps_ipi_waiting(sd) && list_empty(&repoll))
-6355  				goto out;
-6356  			break;
-6357  		}
-6358        //从 list 中取出一个节点，节点的类型是struct napi_struct，在链表中的container_of是poll_list
-6359  		n = list_first_entry(&list, struct napi_struct, poll_list);    //采用的是fifo调度算法
-6360  		budget -= napi_poll(n, &repoll);//使用napi_poll处理
-6361  
-6362  		/* If softirq window is exhausted then punt.
-6363  		 * Allow this to run for 2 jiffies since which will allow
-6364  		 * an average latency of 1.5/HZ.
-6365  		 */
-6366  		if (unlikely(budget <= 0 ||
-6367  			     time_after_eq(jiffies, time_limit))) {//检查是否超时
-6368  			sd->time_squeeze++;
-6369  			break;
-6370  		}
-6371  	}//至此本次软中断处理完了一轮硬件接收中断请
-6372    //如果repoll不为空即仍需继续处理，将repoll中的napi_struct放入当前CPU的私有链表，并触发下一次软中断进行处理
-6373  	local_irq_disable();
-6374    
-6375  	list_splice_tail_init(&sd->poll_list, &list);
-6376  	list_splice_tail(&repoll, &list);
-6377  	list_splice(&list, &sd->poll_list);
-6378  	if (!list_empty(&sd->poll_list))
-6379  		__raise_softirq_irqoff(NET_RX_SOFTIRQ);
-6380  
-6381  	net_rps_action_and_irq_enable(sd);
-6382  out:
-6383  	__kfree_skb_flush();
-6384  }
-```
-
-
-
-poll函数实现可以参考https://gitee.com/ghjiee/ldd3_dev/blob/master/src/snull/snull.c#L288
-
-在 poll函数中最终调用\_\_netif_receive_skb把sk_buffer丢进网络协议栈
-
-```
-napi_gro_receive->napi_skb_finish->netif_receive_skb_internal->__netif_receive_skb
-
-                        netif_receive_skb->netif_receive_skb_internal->__netif_receive_skb
-
-                                                                process_backlog->__netif_receive_skb
-```
-
-丢完所有sk_buffer后再调用napi_complete通知一下网络协议栈。
-
-
-
-### 优化方向
-
-1.优化poll函数本身实现，例如借助DMA减少拷贝
-
-2.可根据实际情况修改如下三个参数进行优化以提高网卡性能：
-netdev_budget                 一次接收软中断最多处理多少个数据包
-netdev_budget_usecs       一次接收软中断最多持续多少时间
-struct napi_struct.weight   一次poll操作最多处理多少个数据包。
-
-一次软接收中断在net_rx_action中的for循环中可以调用多次poll进行处理
-
-weight小于等于网卡的某个ringbuf所能保存的最大数据包个数
-
-
-
-
-
-## 发送
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# 网络协议栈
+# 二.  网络协议栈
 
 
 
@@ -2526,8 +2656,8 @@ kernel-4.19/net/ipv4/tcp_output.c
 1114  					       md5, sk, skb);
 1115  	}
 1116  #endif
-1117  
-1118  	icsk->icsk_af_ops->send_check(sk, skb);//生成TCP header+payload校验
+1117    ////tcp_v4_send_check软件计算出TCP pseudo-header的校验和,注意，此时并未计算TCP header及TCP payload的校验和
+1118  	icsk->icsk_af_ops->send_check(sk, skb);
 1119  
 1120  	if (likely(tcb->tcp_flags & TCPHDR_ACK))//根据tcp_flags判断是否需要携带ACK
 1121  		tcp_event_ack_sent(sk, tcp_skb_pcount(skb), rcv_nxt);
@@ -2720,7 +2850,7 @@ kernel-4.19/net/ipv4/ip_output.c
 95  	struct iphdr *iph = ip_hdr(skb);
 96     // 对skb的长度和IP首部的校验和进行了设置
 97  	iph->tot_len = htons(skb->len);
-98  	ip_send_check(iph);// 计算并设置校验和
+98  	ip_send_check(iph);// 计算并设置ip header校验和
 99  
 100  	/* if egress device is enslaved to an L3 master device pass the
 101  	 * skb to its handler for processing
@@ -2867,7 +2997,300 @@ kernel-4.19/net/ipv4/ip_output.c
 
 
 
+### neigh_output
+
 ![image-20220829184027293](net.assets/image-20220829184027293.png)
+
+ip层在构造好ip头，检查完分片之后，会调用邻居子系统的输出函数neigh_output进行输出，输出分为有二层头缓存和没有两种情况:
+
+没有缓存时，则调用邻居子系统的输出回调函数进行慢速输出。当邻居项不处于NUD_CONNECTD状态时,不允许快速路径发送报文,函数neigh_resolve_output 用于慢而安全的输出,通常用初始化neigh_ops结构来实例output函数,当邻居从NUD_CONNECT转到非NUD_CONNECT的时候,使用neigh_suspect 将output设置为neigh_resolve_output ()
+
+有缓存时(当邻居项处于NUD_CONNECTD状态时)调用neigh_hh_output进行快速输出。
+
+![image-20230227140616035](net.assets/image-20230227140616035.png)
+
+
+
+![image-20230227140958565](net.assets/image-20230227140958565.png)
+
+
+
+
+
+### __dev_queue_xmit
+
+
+
+![image-20230302175606520](net.assets/image-20230302175606520.png)
+
+
+
+
+
+### netdev_core_pick_tx
+
+
+
+队列选择参考  https://blog.csdn.net/wangquan1992/article/details/128619291
+
+netdev_pick_tx返回的是Qdisc(default_qdisc_ops)，default_qdisc_ops默认情况指向了pfifo_fast_ops
+
+
+
+
+
+![image-20230302175809902](net.assets/image-20230302175809902.png)
+
+
+
+![image-20230302175859672](net.assets/image-20230302175859672.png)
+
+
+
+sk_tx_queue_get返回的是struct sock sk里面的sk_tx_queue_mapping.
+
+![image-20230406160540678](net.assets/image-20230406160540678.png)
+
+
+
+如果sk_tx_queue_get返回值小于0有效，则直接使用返回的tx queue index,  struct sock sk代表着一个套接字，从这里可以看出**同一个socket发送的所有skb都走的是同一个tx queue**.注意，可以开启SO_REUSEPORT选项，开启后可以在一个IP+PORT上绑定多个套接字，这样就能同时使用多个tx queue。
+
+
+
+
+
+如果没有sk_tx_queue_get返回值小于0或大于real_num_tx_queue或skb->oo_okay(这个值UDP永远为0，TCP所有分组完成ACK确认后设置成0，否则为1)
+
+则调用get_xps_queue/skb_tx_hash为struct sock sk找到一个合适的发送队列索引，然后调用sk_tx_queue_set将其存储到struct sock sk里面的sk_tx_queue_mapping.
+
+
+
+
+
+
+
+#### get_xps_queue
+
+
+
+如果是作为server创建套接字后先收包再发包，则根据rx queue index(通过sk_rx_queue_get得到，收包时网络协议栈里会调用sk_rx_queue_set保存rx queue index)在xps_maps[XPS_RXQS]中映射得到tx queue index
+
+
+
+如果是作为clientc创建套接字后先发包，则根据发送这个skb的CPU index在xps_maps[XPS_CPUS]中映射得到tx queue index，skb->sender_cpu存放的值是发送该skb的CPU index + 1，因此line 4039需要减1减回来。
+
+
+
+![image-20230302175954125](net.assets/image-20230302175954125.png)
+
+
+
+
+
+xps_maps[XPS_RXQS]   对应的配置文件是/sys/class/net/ens3/queues/tx-0/xps_rxqs
+
+xps_maps[XPS_CPUS] 对应的配置文件是/sys/class/net/ens3/queues/tx-0/xps_cpus
+
+
+
+__netif_set_xps_queue
+
+
+
+
+
+![image-20230406181307157](net.assets/image-20230406181307157.png)
+
+
+
+
+
+```
+1996  struct net_device {
+......
+某些设备支持硬件tx流量控制，这允许管理员将流量控制 offload 到网络硬件，节省系统的 CPU 资源。
+以下三个参数在支持硬件tx流量控制offload时使用：
+
+如果不支持tx queue硬件流量控制offload则为0
+2287  	s16			num_tc;
+
+把tc映射成tx queue index
+2288  	struct netdev_tc_txq	tc_to_txq[TC_MAX_QUEUE];
+
+把skb->priority映射成tc
+2289  	u8			prio_tc_map[TC_BITMASK + 1];
+......
+2325  };
+```
+
+
+
+https://blog.csdn.net/wangquan1992/article/details/128619291
+
+* https://blog.csdn.net/21cnbao/article/details/119284110
+
+
+
+IP_TOS来指定skb->sk->priority
+
+设置源于该套接字的每个IP包的Type-Of-Service（TOS 服务类型）字段。它被用来在网络上区分包的优先级>。TOS是单字节的字段。定义了一些的标准TOS标识：IPTOS_LOWDELAY用来为交互式通信最小化延迟时间，IPTOS_THROUGHPUT用来优化吞吐量，IPTOS_RELIABILITY用来作可靠性优化， IPTOS_MINCOST应该被用作“填充数据”，对于这些数据，低速传输是无关紧要的。至多只能声明这些 TOS 值中的一个，其它的都是无效的，应当被清除。缺省时,Linux首先发送IPTOS_LOWDELAY数据报，但是确切的做法要看配置的排队规则而定。一些高优先级的层次可能会要求一个有效的用户标识0或者CAP_NET_ADMIN能力。
+
+
+
+优先级也可以以于协议无关的方式通过setsocketopt( SOL_SOCKET, SO_PRIORITY )套接字选项来设置。SO_PRIORITY来指定skb->priority, 参考如下代码：
+
+```
+
+/**
+*SO_BINDTODEVICE  套接字网络接口绑定选项
+*SO_PRIORITY      套接字优先级选项
+*/
+ 
+#include<stdio.h>
+#include<stdlib.h>
+#include<sys/socket.h>
+#include<sys/ioctl.h> /*ioctl命令*/
+#include<netinet/if_ether.h> /*ethhdr结构*/
+#include<net/if.h> /*ifreq结构*/
+#include<unistd.h>
+#include<string.h>
+#include<arpa/inet.h>
+#include<netinet/in.h> /*in_addr结构*/
+#include<netinet/ip.h> /*iphdr结构*/
+#include<netinet/udp.h> /*udphdr结构*/
+#include<netinet/tcp.h> /*tcphdr结构*/
+ 
+int main(int argc, char *argv[]){
+    int err;
+    int s = socket(AF_INET , SOCK_STREAM , 0);
+    char ifname[] = "eno1"; /*绑定网卡名称*/
+    struct ifreq if_etho1;  /*绑定网卡结构*/
+    strncpy(if_etho1.ifr_name , ifname , IFNAMSIZ); /*将网卡名称放到结构成员ifr_name中*/
+    err = setsockopt(s , SOL_SOCKET , SO_BINDTODEVICE , (char*)&if_etho1 , sizeof(if_etho1)); /*将s绑定到网卡etho1上*/
+    if(err){//失败
+        printf("setsockopt SO_BINDTODEVCIE failure \n");
+    }else{ //成功
+        printf("setsockopt SO_BINDTODEVCIE success \n");
+    }
+    int opt = 6; /*优先级 0 ~ 6 ：6 最高，优先处理*/
+    err = setsockopt(s , SOL_SOCKET , SO_PRIORITY , &opt , sizeof(opt));/*设置s的优先级*/
+    if(err){//失败
+        printf("setsockopt SO_PRIORITY failure \n");
+    }else{ //成功
+        printf("setsockopt SO_PRIORITY success \n");
+    }
+ 
+    return 0;
+}
+```
+
+
+
+
+
+
+
+####  skb_tx_hash
+
+
+
+![image-20230406161847449](net.assets/image-20230406161847449.png)
+
+
+
+
+
+
+### __dev_xmit_skb
+
+
+
+参考https://blog.csdn.net/one_clouder/article/details/52685249
+
+
+
+```
+
+
+__dev_queue_xmit 中调用netdev_core_pick_tx获取netdev_queue(可以认为是Qdisc(pfifo_fast_ops))，然后调用__dev_xmit_skb发送skb,__dev_xmit_skb中根据netdev_queue的flag进行不同的动作，但大体一致。
+
+
+如果Qdisc有TCQ_F_NOLOCK标志，如果同时满足如下三个条件：
+1.netdev_queue的flag具有TCQ_F_CAN_BYPASS标志
+2.netdev_queue中为空，没有skb。
+3.qdisc_run_begin返回true。
+则使用sch_direct_xmit绕过netdev_queue直接调用sch_direct_xmit发送到网卡，如果直接发送后网卡若是还能继续发送(sch_direct_xmit返回true)且netdev_queue中不为空，则调用__qdisc_run继续去发送其他skb。
+如果以上三个条件不能同时满足，则调用dev_qdisc_enqueue先将skb放入netdev_queue，然后调用qdisc_run，qdisc_run其实就是qdisc_run_begin、__qdisc_run、qdisc_run_end的封装。
+
+
+
+如果Qdisc没有TCQ_F_NOLOCK，如果同时满足如下三个条件：
+1.netdev_queue的flag具有TCQ_F_CAN_BYPASS标志
+2.netdev_queue中为空，没有skb。
+3.qdisc_run_begin返回true。
+则使用sch_direct_xmit绕过netdev_queue直接调用sch_direct_xmit发送到网卡，如果直接发送后网卡若是还能继续发送(sch_direct_xmit返回true)，则调用__qdisc_run启动队列继续去发送。
+如果以上三个条件不能同时满足，则调用dev_qdisc_enqueue先将skb放入netdev_queue，接着判断如果netdev_queue的为处于RUNNING状态(qdisc_run_begin返回true)，则调用__qdisc_run去发送
+```
+
+
+
+![image-20230306104128435](net.assets/image-20230306104128435.png)
+
+
+
+
+
+* qdisc_run其实就是qdisc_run_begin、__qdisc_run、qdisc_run_end的封装。
+
+![image-20230306143901054](net.assets/image-20230306143901054.png)
+
+qdisc_run_begin 检查 qdisc 是否设置了 RUNNING 状态位。如果设置了，直接返回 false ；否则，设置此状态位，然后返回 true 。qdisc_run_end 执行相反的操作，清除此状态位。这两个函数都 只是设置状态位，并没有真正干活。
+
+总之只有队列没有RUNING状态位接着设置 RUNNING 状态位，才去调用__qdisc_run去发送。
+
+
+
+* 
+
+
+
+![image-20230306183122592](net.assets/image-20230306183122592.png)
+
+
+
+
+
+
+
+* Qdisc(pfifo_fast_ops)队列缺省设置了TCQ_F_NOLOCK标志，且在init初始化时指定了TCQ_F_CAN_BYPASS标志。
+
+![image-20230306143521889](net.assets/image-20230306143521889.png)
+
+![image-20230302181944602](net.assets/image-20230302181944602.png)
+
+
+
+
+
+
+
+
+
+### sch_direct_xmit
+
+
+
+### validate_xmit_skb_list
+
+​       validate_xmit_skb
+
+
+
+### dev_hard_start_xmit
+
+
+
+### net_tx_action
 
 
 
@@ -2919,6 +3342,13 @@ close
 
 
 
+# 三.  网卡驱动
+
+## alloc_netdev_mqs
+
+
+
+![image-20230228165132850](net.assets/image-20230228165132850.png)
 
 
 
@@ -2926,7 +3356,1010 @@ close
 
 
 
-# 无线网卡
+```
+net/core/dev.c 
+10785  /**
+10786   * alloc_netdev_mqs - allocate network device
+10787   * @sizeof_priv: size of private data to allocate space for
+10788   * @name: device name format string
+10789   * @name_assign_type: origin of device name
+10790   * @setup: callback to initialize device
+10791   * @txqs: the number of TX subqueues to allocate
+10792   * @rxqs: the number of RX subqueues to allocate
+10793   *
+10794   * Allocates a struct net_device with private data area for driver use
+10795   * and performs basic initialization.  Also allocates subqueue structs
+10796   * for each queue on the device.
+10797   */
+10798  struct net_device *alloc_netdev_mqs(int sizeof_priv, const char *name,
+10799  		unsigned char name_assign_type,
+10800  		void (*setup)(struct net_device *),
+10801  		unsigned int txqs, unsigned int rxqs)
+10802  {
+......
+10844  	if (dev_addr_init(dev))//初始化dev->dev_addrs,把dev->dev_addr指向dev->dev_addrs链表的第一个节点
+10845  		goto free_pcpu;
+10846  
+10847  	dev_mc_init(dev);
+10848  	dev_uc_init(dev);
+10849  
+10850  	dev_net_set(dev, &init_net);
+10851  
+10852  	dev->gso_max_size = GSO_MAX_SIZE;
+10853  	dev->gso_max_segs = GSO_MAX_SEGS;
+......
+10873  	dev->priv_flags = IFF_XMIT_DST_RELEASE | IFF_XMIT_DST_RELEASE_PERM;
+10874  	setup(dev);//setup函数指针参数一般指向ether_setup
+10875  
+10876  	if (!dev->tx_queue_len) {//ether_setup中已经设置了dev->tx_queue_len	= DEFAULT_TX_QUEUE_LEN
+10877  		dev->priv_flags |= IFF_NO_QUEUE;//因此不会进入这个if
+10878  		dev->tx_queue_len = DEFAULT_TX_QUEUE_LEN;
+10879  	}
+10880  
+10881  	dev->num_tx_queues = txqs;
+10882  	dev->real_num_tx_queues = txqs;
+10883  	if (netif_alloc_netdev_queues(dev))//分配dev->_tx (struct netdev_queue类型)
+10884  		goto free_all;
+10885  
+10886  	dev->num_rx_queues = rxqs;
+10887  	dev->real_num_rx_queues = rxqs;
+10888  	if (netif_alloc_rx_queues(dev))//分配dev->_rx (struct netdev_queue类型)
+10889  		goto free_all;
+10890  
+10891  	strcpy(dev->name, name);
+10892  	dev->name_assign_type = name_assign_type;
+10893  	dev->group = INIT_NETDEV_GROUP;
+10894  	if (!dev->ethtool_ops)//如果没有则设置默认的ethtool_ops
+10895  		dev->ethtool_ops = &default_ethtool_ops;
+......
+10912  }
+10913  EXPORT_SYMBOL(alloc_netdev_mqs);
+```
+
+
+
+
+
+
+
+alloc_netdev_mqs第二个参数name的形式如“eth%d”，内核在注册设备时，检查到%d标识符，会调用函数dev_alloc_name在系统中查找尚未使用的序列号，将eth%d替换为eth6等。
+
+
+
+alloc_netdev_mqs第三个参数name_assign_type可选赋值如下：
+
+```
+include/uapi/linux/netdevice.h
+41  /* interface name assignment types (sysfs name_assign_type attribute) */
+42  #define NET_NAME_UNKNOWN	0	/* unknown origin (not exposed to userspace) */
+43  #define NET_NAME_ENUM		1	/* enumerated by kernel */
+44  #define NET_NAME_PREDICTABLE	2	/* predictably named by the kernel */
+45  #define NET_NAME_USER		3	/* provided by user-space */
+46  #define NET_NAME_RENAMED	4	/* renamed by user-space */
+```
+
+
+
+
+
+alloc_netdev_mqs第四个参数setup函数指针一般填ether_setup：
+
+![image-20230301170715306](net.assets/image-20230301170715306.png)
+
+
+
+## netif_napi_add
+
+
+
+net/core/dev.c
+
+```
+6889  
+6890  void netif_napi_add(struct net_device *dev, struct napi_struct *napi,
+6891  		    int (*poll)(struct napi_struct *, int), int weight)
+6892  {
+6893  	if (WARN_ON(test_and_set_bit(NAPI_STATE_LISTED, &napi->state)))
+6894  		return;
+6895  
+6896  	INIT_LIST_HEAD(&napi->poll_list);
+6897  	INIT_HLIST_NODE(&napi->napi_hash_node);
+6898  	hrtimer_init(&napi->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL_PINNED);
+6899  	napi->timer.function = napi_watchdog;
+6900  	init_gro_hash(napi);
+6901  	napi->skb = NULL;
+6902  	INIT_LIST_HEAD(&napi->rx_list);
+6903  	napi->rx_count = 0;
+6904  	napi->poll = poll;
+6905  	if (weight > NAPI_POLL_WEIGHT)
+6906  		netdev_err_once(dev, "%s() called with weight %d\n", __func__,
+6907  				weight);
+6908  	napi->weight = weight;
+6909  	napi->dev = dev;
+6910  #ifdef CONFIG_NETPOLL
+6911  	napi->poll_owner = -1;
+6912  #endif
+6913  	set_bit(NAPI_STATE_SCHED, &napi->state);
+6914  	set_bit(NAPI_STATE_NPSVC, &napi->state);
+6915  	list_add_rcu(&napi->dev_list, &dev->napi_list);
+6916  	napi_hash_add(napi);
+6917  	/* Create kthread for this napi if dev->threaded is set.
+6918  	 * Clear dev->threaded if kthread creation failed so that
+6919  	 * threaded mode will not be enabled in napi_enable().
+6920  	 */
+6921  	if (dev->threaded && napi_kthread_create(napi))
+6922  		dev->threaded = 0;
+6923  }
+6924  EXPORT_SYMBOL(netif_napi_add);
+```
+
+
+
+
+
+
+
+## register_netdev
+
+
+
+![image-20230301172012726](net.assets/image-20230301172012726.png)
+
+
+
+```
+net/core/dev.c
+10228  int register_netdevice(struct net_device *dev)
+10229  {
+......
+10260  	/* Init, if this function is available */
+10261  	if (dev->netdev_ops->ndo_init) {
+10262  		ret = dev->netdev_ops->ndo_init(dev);//回调ndo_init
+10263  		if (ret) {
+10264  			if (ret > 0)
+10265  				ret = -EIO;
+10266  			goto err_free_name;
+10267  		}
+10268  	}
+......  //有些跟dev->feature相关的处理，即网卡的一些硬件属性标志
+10350  	dev_init_scheduler(dev);//将所有netdev->tx[i]中的排队规则qdisc设置成了noo_qdisc。
+......
+10390  }
+10391  EXPORT_SYMBOL(register_netdevice);
+```
+
+
+
+```
+1393  void dev_init_scheduler(struct net_device *dev)
+1394  {
+        //line1395代码作用：dev->qdisc = &noop_qdisc
+1395  	rcu_assign_pointer(dev->qdisc, &noop_qdisc);
+
+        //line1396代码作用：dev->_tx[i]->qdisc == dev->_tx[i]->qdisc_sleeping == &noop_qdisc
+1396  	netdev_for_each_tx_queue(dev, dev_init_scheduler_queue, &noop_qdisc);
+1397  	if (dev_ingress_queue(dev))
+1398  		dev_init_scheduler_queue(dev, dev_ingress_queue(dev), &noop_qdisc);
+1399  
+1400  	timer_setup(&dev->watchdog_timer, dev_watchdog, 0);
+1401  }
+```
+
+
+
+
+
+
+
+
+
+
+
+## ifconfig eth0 up
+
+ifconfig eth0 up让网卡从down变成up时\_\_dev_change_flags会调用\_\_dev_open:
+
+![image-20230301173249570](net.assets/image-20230301173249570.png)
+
+
+
+\_\_dev_open里面主要干如下几件事：
+
+* 回调ndo_validate_addr(验证MAC地址是否合法，应该一般没有使用)
+
+* 回调ndo_open函数指针
+
+* 设置dev->flags |= IFF_UP
+
+* 调用dev_set_rx_mode函数
+
+* 调用dev_activate函数
+
+![image-20230301173841423](net.assets/image-20230301173841423.png)
+
+
+
+### ndo_open
+
+
+
+* 设置LAN mac地址(参考后面MAC地址章节)
+* 申请资源，注册中断，ioremap映射物理地址、ring buffer 一致性映射等
+
+
+
+
+
+### dev_set_rx_mode
+
+这个函数主要用来设置网卡接收MAC地址屏蔽
+
+![image-20230301175933238](net.assets/image-20230301175933238.png)
+
+![image-20230301180131368](net.assets/image-20230301180131368.png)
+
+__dev_set_rx_mode函数里看下网卡是否有接收MAC地址屏蔽功能(IFF_UNICAST_FLT，一般网卡都有这个功能，没有这个功能的网卡会接收链路上的所有MAC帧)，具有接收MAC地址屏蔽功能的网卡的驱动一般都会实现ndo_set_rx_mode
+
+
+
+如果没有接收MAC地址屏蔽功能，则在单播MAC地址dev->uc不为空且上层协议栈不处于因uc导致的混杂模式，则需要调用\_\_dev_set_promiscuity告诉上层网络协议栈切换成因uc导致的混杂模式。反之单播MAC地址dev->uc为空且上层协议栈处于因uc导致的混杂模式，则需要调用\_\_dev_set_promiscuity告诉上层网络协议栈关闭因uc导致的混杂模式。dev->uc_promisc仅在不支持接收MAC地址屏蔽功能才有意义。
+
+
+
+
+
+
+
+### dev_activate
+
+
+
+![image-20230302155719972](net.assets/image-20230302155719972.png)
+
+
+
+#### attach_default_qdiscs
+
+前面register_netdev->register_netdevice->dev_init_scheduler函数里面把dev->qdisc设置成了noop_qdisc，因此dev_activate会调用attach_default_qdiscs：
+
+![image-20230302145200973](net.assets/image-20230302145200973.png)
+
+attach_default_qdiscs函数里根据网卡设备，对排队规则进行不同初始化，最终结果如下：
+
+    设备只有一个队列，或者设置了IFF_NO_QUEUE标志，为此队列绑定默认的qdisc:
+    dev->qdisc                     =  dev->_tx[0]->qdisc_sleeping
+    dev->_tx[i]->qdisc             =  &noop_qdisc
+    dev->_tx[i]->qdisc_sleeping    =  Qdisc(default_qdisc_ops)
+    
+    对于多队列设备，创建默认的MQ队列:
+    dev->qdisc                     = Qdisc(mq_qdisc_ops)
+    dev->_tx[i]->qdisc             = &noop_qdisc
+    dev->_tx[i]->qdisc_sleeping    = Qdisc(default_qdisc_ops) i属于[0, dev->real_num_tx_queues)
+    dev->_tx[i]->qdisc_sleeping    = Qdisc(pfifo_fast_ops)  i属于(dev->real_num_tx_queues,dev->num_tx_queues)
+* single queue || IFF_NO_QUEUE
+
+attach_one_default_qdisc函数里调用qdisc_create_dflt得到Qdisc，r然后把Qdsic赋值到dev->_tx[i]->qdisc_sleeping
+
+![image-20230302150252633](net.assets/image-20230302150252633.png)
+
+qdisc_create_dflt里面调用qdisc_alloc把Qdisc_ops制作成Qdisc，然后回调Qdisc_ops->init,对于single queue,Qdisc_ops指向default_qdisc_ops
+
+![image-20230302150329380](net.assets/image-20230302150329380.png)
+
+default_qdisc_ops缺省指向pfifo_fast_ops
+
+![image-20230302150851233](net.assets/image-20230302150851233.png)
+
+但在定义CONFIG_NET_SCHED宏的情况下可以sysctl   net.core.default_qdisc=xxxx去配置default_qdisc_ops
+
+![image-20230302151249859](net.assets/image-20230302151249859.png)
+
+![image-20230302151352885](net.assets/image-20230302151352885.png)
+
+![image-20230302151420157](net.assets/image-20230302151420157.png)
+
+此外如果定义了CONFIG_NET_SCH_DEFAULT宏，则系统开机时会自动把default_qdisc_ops配置成CONFIG_DEFAULT_NET_SCH:
+
+![image-20230302151655308](net.assets/image-20230302151655308.png)
+
+![image-20230302151627276](net.assets/image-20230302151627276.png)
+
+* multi queue:
+
+attach_default_qdiscs函数里multi queue的情况下把dev->qdisc指向使用qdisc_create_dflt创建的Qdisc(mq_qdisc_ops)之后，回调mq_qdisc_ops->attach:
+
+​                                                                                net/sched/sch_mq.c
+
+![image-20230302152411000](net.assets/image-20230302152411000.png)
+
+![image-20230302152520957](net.assets/image-20230302152520957.png)
+
+在mq_attach里通过调用dev_graft_qdisc对dev的所有tx queue进行初始化，dev_graft_qdisc里面将dev_qeuue->qdisc_sleeping指向传入的qdisc，qdisc来自 Qdisc(mq_qdisc_ops)  的prv->qdisc[i]，然后把dev_qeuue->qdisc指向noop_qdisc：
+
+![image-20230302152648950](net.assets/image-20230302152648950.png)
+
+在使用qdisc_create_dflt创建Qdisc(mq_qdisc_ops)时  ，在qdisc_create_dflt函数里会回调mq_qdisc_ops->init函数指针，Qdisc(mq_qdisc_ops)  的prv->qdisc[i]就是在mq_init函数里初始化：
+
+![image-20230302152724471](net.assets/image-20230302152724471.png)
+
+初始化prv->qdisc[i]时根据get_default_qdisc_ops返回值决定需要创建qdisc所使用的Qdisc_ops.
+
+当tx队列索引 i 属于[0, dev->real_num_tx_queues)时使用default_qdisc_ops
+
+当tx队列索引 i 属于(dev->real_num_tx_queues,dev->num_tx_queues)时使用pfifo_fast_ops
+
+![image-20230302152756927](net.assets/image-20230302152756927.png)
+
+
+
+#### transition_one_qdisc
+
+dev_activate里面调用attach_default_qdiscs初始化了dev->\_tx[i]->qdisc_sleeping
+
+接着再dev_activate去调用transition_one_qdisc把dev->\_tx[i]->qdisc_sleeping 赋值给dev->\_tx[i]->qdisc
+
+![image-20230302155639051](net.assets/image-20230302155639051.png)
+
+
+
+
+
+## NIC发送
+
+
+
+
+
+
+
+
+
+
+## NIC接收
+
+
+
+
+
+
+
+## NAPI发送
+
+
+
+
+
+### xps
+
+https://www.cnblogs.com/charlieroro/p/14047183.html
+
+
+
+
+
+## NAPI接收
+
+### 流程原理
+
+参考stm32 ethernet DMA机制
+
+DMA描述符中的Control/Status是flag,Buffer Count是DMA控制器传输的目标内存块尺寸，Buffer Address指针指向了DMA控制器传输的目标内存首地址，DMA控制器可以根据这些flag标记判断是否有空节点。
+
+![img](net.assets/v2-696e07d0ebb13efe91cc240d28add341_720w.jpg)
+
+ringbuffer = DMA描述符链表 + DMA描述符中Buffer Address指向的内存块。
+
+当网卡收到数据后触发接收事件，DMA控制器处理网卡接收事件时，首先遍历在ringbuffer中的DMA描述符，找到一个空的，然后将数据传输到空的DMA描述符的Buffer Address指针指向的内存地址。
+
+可能DMA控制器处理一次网卡接收事件时会用掉好几个空的DMA描述符，数据放到了好几块非连续的内存块。
+
+DMA控制器处理完网卡接收事件后向中断控制器发送中断请求，然后中断控制器打断CPU让其去处理DMA接收完成硬件中断，硬件中断唤醒软中断，软中断调用poll。
+
+poll函数记录下指向接收数据的旧的Buffer Address，然后开辟一块新的内存并把DMA描述符中Buffer Address指向新开辟的内存，修改flag标记为空且将归属权交给DMA控制器，判断一下如果DMA停止了且网卡还有接收的数据需要传输则重新启动DMA。接着创建sk_buff,使用指向接收数据的旧的Buffer Addres来初始化sk_buff里面的一些指针字段，掐掉数据链路层的头部后调用\_\_netif_receive_skb把sk_buff丢到网络协议栈。
+
+当网络协议栈处理完sk_buff后释放时顺带释放指向接收数据的旧的Buffer Address。
+
+整个流程避免了使用CPU从网卡拷贝接收数据到内存。
+
+
+
+注意，一个sk_buff中传输的数据可以由多块不连续的内存块组成。一次poll函数可以调用多次\_\_netif_receive_skb往网络协议栈丢入sk_buff，\_\_netif_receive_skb每次只处理一个sk_buff，即该sk_buff代表一个ip数据包。
+
+
+
+
+
+
+
+
+
+### 中断上半部
+
+对于NAPI，中断上半部不需要构建sk_buff，首先保存先前的中断状态并禁止当前单个处理器的所有硬件中断，接着调用\_\_\_\_napi_schedule把struct napi_struct结构体放入当前CPU私有数据链表中，然后调用\_\_raise_softirq_irqoff通知当前CPU的ksoftirq线程可以处理软中断了，通知完成后(不需要等ksoftirq线程处理完成)一路返回并恢复先前的中断状态。
+
+
+
+![image-20220816100914722](net.assets/image-20220816100914722.png)
+
+
+
+![image-20220816100707075](net.assets/image-20220816100707075.png)
+
+
+
+local_irq_save(flags);//保存先前中断状态，并禁止当前单个处理器的所有中断
+
+local_irq_restore(flags);//恢复当前单个处理器的中断状态
+
+
+
+![image-20220816100618864](net.assets/image-20220816100618864.png)
+
+
+
+![image-20220816103656815](net.assets/image-20220816103656815.png)
+
+
+
+### net_rx_action
+
+前面在中断上半部\_\_\_\_napi_schedule中调用\_\_raise_softirq_irqoff(NET_RX_SOFTIRQ)来唤醒ksoftirq进行处理，接下来看它是如何处理的，在内核启动时调用了net_dev_init，在这个里面注册了net_rx_action处理函数：
+
+kernel-4.19/net/core/dev.c
+
+```c
+static int __init net_dev_init(void)
+9818  {
+......
+9883  	open_softirq(NET_TX_SOFTIRQ, net_tx_action);
+9884  	open_softirq(NET_RX_SOFTIRQ, net_rx_action);
+......
+9892  }
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+- SEC  秒
+- PER  每
+- NSEC 纳秒
+- MSEC 毫秒
+- USEC 微秒
+
+```cpp
+#define NSEC_PER_SEC 1000000000ull     多少纳秒 = 1秒            1秒 = 10亿纳秒              
+#define NSEC_PER_MSEC 1000000ull       多少纳秒 = 1毫秒          1毫秒 = 100万纳秒
+#define USEC_PER_SEC 1000000ull        多少微秒 = 1秒            1秒 = 100万微秒   
+#define NSEC_PER_USEC 1000ull          多少纳秒 = 1微秒           1微秒 = 1000 纳秒
+```
+
+
+
+kernel-4.19/net/core/dev.c
+
+```c
+3936  int netdev_budget __read_mostly = 300; //一次接收软中断最多处理300个数据包
+3937  /* Must be at least 2 jiffes to guarantee 1 jiffy timeout */   // 一次接收软中断最多持续 200万个 1/HZ 时间
+3938  unsigned int __read_mostly netdev_budget_usecs = 2 * USEC_PER_SEC / HZ;
+
+......
+ 
+6272  static int napi_poll(struct napi_struct *n, struct list_head *repoll)
+6273  {
+6274  	void *have;
+6275  	int work, weight;
+6276  
+6277  	list_del_init(&n->poll_list);
+6278  
+6279  	have = netpoll_poll_lock(n);
+6280  
+6281  	weight = n->weight;//weight在netif_napi_add初始化napi_struct时指定，即一次最大能处理多少个数据包
+6282  
+6283  	/* This NAPI_STATE_SCHED test is for avoiding a race
+6284  	 * with netpoll's poll_napi().  Only the entity which
+6285  	 * obtains the lock and sees NAPI_STATE_SCHED set will
+6286  	 * actually make the ->poll() call.  Therefore we avoid
+6287  	 * accidentally calling ->poll() when NAPI is not scheduled.
+6288  	 */
+6289  	work = 0;
+6290  	if (test_bit(NAPI_STATE_SCHED, &n->state)) {
+6291  		struct softnet_data *sd = this_cpu_ptr(&softnet_data);
+6292  
+6293  		sd->current_napi = n;
+6294  		work = n->poll(n, weight);//回调struct napi_struct中的poll函数指针来进行处理，poll返回处理了多少个数据包
+6295  		trace_napi_poll(n, work, weight);
+6296  	}
+6297  
+6298  	WARN_ON_ONCE(work > weight);
+6299  
+6300  	if (likely(work < weight))       
+6301  		goto out_unlock;//收包数量小于配额，全部读完了就退出
+6302    //接下来的代码处理超过weight后还需要继续poll的情况
+6303  	/* Drivers must not modify the NAPI state if they
+6304  	 * consume the entire weight.  In such cases this code
+6305  	 * still "owns" the NAPI instance and therefore can
+6306  	 * move the instance around on the list at-will.
+6307  	 */
+6308  	if (unlikely(napi_disable_pending(n))) {
+6309  		napi_complete(n);
+6310  		goto out_unlock;
+6311  	}
+6312  
+6313  	if (n->gro_bitmask) {
+6314  		/* flush too old packets
+6315  		 * If HZ < 1000, flush all packets.
+6316  		 */
+6317  		napi_gro_flush(n, HZ >= 1000);
+6318  	}
+6319  
+6320  	/* Some drivers may have called napi_schedule
+6321  	 * prior to exhausting their budget.
+6322  	 */
+6323  	if (unlikely(!list_empty(&n->poll_list))) {
+6324  		pr_warn_once("%s: Budget exhausted after napi rescheduled\n",
+6325  			     n->dev ? n->dev->name : "backlog");
+6326  		goto out_unlock;
+6327  	}
+6328  
+6329  	list_add_tail(&n->poll_list, repoll);      //将超过weight后还需要继续poll的napi_struct挂到 repoll 链表上
+6330  
+6331  out_unlock:
+6332  	netpoll_poll_unlock(have);
+6333  
+6334  	return work;
+6335  }
+6336  //open_softirq(NET_RX_SOFTIRQ, net_rx_action)注册的软中断接收处理函数
+6337  static __latent_entropy void net_rx_action(struct softirq_action *h)
+6338  {
+6339  	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
+6340  	unsigned long time_limit = jiffies +
+6341  		usecs_to_jiffies(netdev_budget_usecs);  //记录超时时候的 jiffies
+6342  	int budget = netdev_budget;//记录本次软中断还能处理多少个包
+6343  	LIST_HEAD(list);//创建并初始化一个list链表头
+6344  	LIST_HEAD(repoll);
+6345  
+6346  	local_irq_disable();
+6347  	list_splice_init(&sd->poll_list, &list);//将当前cpu的待处理的napi_struct转移到list
+6348  	local_irq_enable();
+6349  
+6350  	for (;;) {//循环处理 list 中的每个节点，每个节点对应一次硬件接收中断，一次软中断可以会处理多次硬中断请求
+6351  		struct napi_struct *n;
+6352  
+6353  		if (list_empty(&list)) {
+6354  			if (!sd_has_rps_ipi_waiting(sd) && list_empty(&repoll))
+6355  				goto out;
+6356  			break;
+6357  		}
+6358        //从 list 中取出一个节点，节点的类型是struct napi_struct，在链表中的container_of是poll_list
+6359  		n = list_first_entry(&list, struct napi_struct, poll_list);    //采用的是fifo调度算法
+6360  		budget -= napi_poll(n, &repoll);//使用napi_poll处理
+6361  
+6362  		/* If softirq window is exhausted then punt.
+6363  		 * Allow this to run for 2 jiffies since which will allow
+6364  		 * an average latency of 1.5/HZ.
+6365  		 */
+6366  		if (unlikely(budget <= 0 ||
+6367  			     time_after_eq(jiffies, time_limit))) {//检查是否超时
+6368  			sd->time_squeeze++;
+6369  			break;
+6370  		}
+6371  	}//至此本次软中断处理完了一轮硬件接收中断请
+6372    //如果repoll不为空即仍需继续处理，将repoll中的napi_struct放入当前CPU的私有链表，并触发下一次软中断进行处理
+6373  	local_irq_disable();
+6374    
+6375  	list_splice_tail_init(&sd->poll_list, &list);
+6376  	list_splice_tail(&repoll, &list);
+6377  	list_splice(&list, &sd->poll_list);
+6378  	if (!list_empty(&sd->poll_list))
+6379  		__raise_softirq_irqoff(NET_RX_SOFTIRQ);
+6380  
+6381  	net_rps_action_and_irq_enable(sd);
+6382  out:
+6383  	__kfree_skb_flush();
+6384  }
+```
+
+
+
+
+
+![image-20230404154537431](net.assets/image-20230404154537431.png)
+
+
+
+![image-20230404154914510](net.assets/image-20230404154914510.png)
+
+前面分析过调用\_\_\_\_napi_schedule唤醒net_rx_action软中断
+
+poll函数最终指向什么函数完全取决于调用\_\_\_\_napi_schedule时传入的struct napi_struct结构体
+
+如果是网卡驱动自己实现的struct napi_struct结构体则指向了自己实现的poll函数。
+
+
+
+poll函数实现可以参考https://gitee.com/ghjiee/ldd3_dev/blob/master/src/snull/snull.c#L288
+
+在 poll函数中最终调用\_\_netif_receive_skb把sk_buffer丢进网络协议栈
+
+```
+napi_gro_receive->napi_skb_finish->...->netif_receive_skb_internal->如果是__netif_receive_skb
+
+
+                     netif_receive_skb->netif_receive_skb_internal->可能会调__netif_receive_skb
+
+                                                                process_backlog->__netif_receive_skb
+```
+
+丢完所有sk_buffer后再调用napi_complete通知一下网络协议栈。
+
+
+
+### receive
+
+* napi_gro_receive
+
+
+
+* netif_receive_skb
+
+![image-20230404150239447](net.assets/image-20230404150239447.png)
+
+网卡驱动接收时在软中断回调poll函数，poll函数里调用napi_gro_receive/netif_receive_skb，开启CONFIG_RPS选项后接收函数会间接调到get_rps_cpu函数选择要把接收的skb交给哪个CPU的软中断去处理，如果选择失败则在当前CPU的软中断调用__netif_receive_skb去处理接收到的skb，否则则调用enqueue_to_backlog交给对应
+
+![image-20230404150326129](net.assets/image-20230404150326129.png)
+
+
+
+### RPS/RFS/RSS/ARFS
+
+
+
+RSS是RPS的硬件实现，根据收到数据包hash放入特定接收ring，该接收ring中断绑定到特定CPU。通过hash均衡映射到不同的CPU。
+
+ARFS是RFS的硬件实现。根据收到数据包hash放入特定接收ring，该接收ring中断绑定到特定CPU，该CPU上运行着需要该数据包的应用程序。
+
+
+
+
+
+* RPS
+
+get_rps_cpu
+
+store_rps_map
+
+reciprocal_scale
+
+
+
+参考 https://blog.csdn.net/maimang1001/article/details/115857606
+
+```
+4422  static int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
+4423  		       struct rps_dev_flow **rflowp)
+4424  {
+4425  	const struct rps_sock_flow_table *sock_flow_table;
+4426  	struct netdev_rx_queue *rxqueue = dev->_rx;
+4427  	struct rps_dev_flow_table *flow_table;
+4428  	struct rps_map *map;
+4429  	int cpu = -1;
+4430  	u32 tcpu;
+4431  	u32 hash;
+4432  
+4433  	if (skb_rx_queue_recorded(skb)) {
+4434  		u16 index = skb_get_rx_queue(skb);
+4435  
+4436  		if (unlikely(index >= dev->real_num_rx_queues)) {
+4437  			WARN_ONCE(dev->real_num_rx_queues > 1,
+4438  				  "%s received packet on queue %u, but number "
+4439  				  "of RX queues is %u\n",
+4440  				  dev->name, index, dev->real_num_rx_queues);
+4441  			goto done;
+4442  		}
+4443  		rxqueue += index;
+4444  	}
+4445  
+4446  	/* Avoid computing hash if RFS/RPS is not active for this rxqueue */
+4447  
+4448  	flow_table = rcu_dereference(rxqueue->rps_flow_table);
+4449  	map = rcu_dereference(rxqueue->rps_map);
+4450  	if (!flow_table && !map)
+4451  		goto done;
+4452  
+4453  	skb_reset_network_header(skb);
+
+	/* 
+	 * 获取报文的hash值，如果硬件计算了，就用硬件计算的，否则进行软件计算，
+	 * 后续会用这个hash值去索引rps_dev_flow_table和rps_sock_flow_table两个流表
+	 */
+
+4454  	hash = skb_get_hash(skb);
+4455  	if (!hash)
+4456  		goto done;
+4457  
+4458  	sock_flow_table = rcu_dereference(rps_sock_flow_table);
+4459  	if (flow_table && sock_flow_table) {
+4460  		struct rps_dev_flow *rflow;
+4461  		u32 next_cpu;
+4462  		u32 ident;
+4463  
+4464  		/* First check into global flow table if there is a match */
+			/*hash & sock_flow_table->mask 用hash值对表的掩码求余，获取对应的表项索引 */
+            /*ents[i]的上半部的hash高位 或上 CPU_id*/
+4465  		ident = sock_flow_table->ents[hash & sock_flow_table->mask];
+4466  		if ((ident ^ hash) & ~rps_cpu_mask)//判断是全局流表中否有对应的[hash,cpu_id]组合
+4467  			goto try_rps;//如果全局流表中找不到对应的CPU_id跳转至根据RPS决定发往哪个CPU
+
+
+在流建立之初肯定是找不到，因此使用RPS负载均衡到各个CPU
+在流建立之后则根据RFS发往应用程序所在的的CPU进行处理(如果该CPU没达到上限)
+
+
+4468        //全局流表中找找得到对应的[hash,cpu_id]组合，根据RFS决定发往哪个CPU
+4469  		next_cpu = ident & rps_cpu_mask;
+4470  
+4471  		/* OK, now we know there is a match,
+4472  		 * we can look at the local (per receive queue) flow table
+4473  		 */
+4474  		rflow = &flow_table->flows[hash & flow_table->mask];
+4475  		tcpu = rflow->cpu;
+4476  
+4477  		/*
+4478  		 * If the desired CPU (where last recvmsg was done) is
+4479  		 * different from current CPU (one in the rx-queue flow
+4480  		 * table entry), switch if one of the following holds:
+4481  		 *   - Current CPU is unset (>= nr_cpu_ids).
+4482  		 *   - Current CPU is offline.
+4483  		 *   - The current CPU's queue tail has advanced beyond the
+4484  		 *     last packet that was enqueued using this table entry.
+4485  		 *     This guarantees that all previous packets for the flow
+4486  		 *     have been dequeued, thus preserving in order delivery.
+4487  		 */
+4488  		if (unlikely(tcpu != next_cpu) &&
+4489  		    (tcpu >= nr_cpu_ids || !cpu_online(tcpu) ||
+4490  		     ((int)(per_cpu(softnet_data, tcpu).input_queue_head -
+4491  		      rflow->last_qtail)) >= 0)) {
+4492  			tcpu = next_cpu;
+4493  			rflow = set_rps_cpu(dev, skb, rflow, next_cpu);
+4494  		}
+4495  
+4496  		if (tcpu < nr_cpu_ids && cpu_online(tcpu)) {
+4497  			*rflowp = rflow;
+4498  			cpu = tcpu;
+4499  			goto done;
+4500  		}
+4501  	}
+4502  
+4503  try_rps:
+4504  
+4505  	if (map) {//map的设置参考store_rps_map函数
+4506  		tcpu = map->cpus[reciprocal_scale(hash, map->len)];
+4507  		if (cpu_online(tcpu)) {
+4508  			cpu = tcpu;
+4509  			goto done;
+4510  		}
+4511  	}
+4512  
+4513  done:
+4514  	return cpu;
+4515  }
+```
+
+
+
+
+
+
+
+```
+
+全局socket流表会在调用recvmsg()等函数时被更新，而在这些函数中是通过调用函数sock_rps_record_flow()来更新或者记录流表项信息的，而sock_rps_record_flow()中最终又是调用函数rps_record_sock_flow()来更新ents柔性数组的，该函数实现如下：
+
+static inline void rps_record_sock_flow(struct rps_sock_flow_table *table,
+					u32 hash)
+{
+	if (table && hash) {
+		/* 用hash值对表的掩码求余，获取对应的表项索引 */
+		unsigned int index = hash & table->mask;
+
+		/* 保留hash值的高位，将用来存放cpu id的低位清零 */
+		u32 val = hash & ~rps_cpu_mask;
+
+		/* We only give a hint, preemption can change CPU under us */
+		/* 
+		 * raw_smp_processor_id()获取当前cpu，经过上面和这两部分，val存放了
+		 * 高位hash值和cpu id，为什么在高位还需要保留部分hash值而不直接存放cpu
+		 * id呢?原因是因为在get_rps_cpu()函数中，还会用val中存放的高位hash值
+		 * 来校验skb中的hash值是否在rps_sock_flow_table中有对应的记录。详情可以
+		 * 参考get_rps_cpu()。
+		 */
+		val |= raw_smp_processor_id();
+
+		/* 记录hash值对应的cpu */
+		if (table->ents[index] != val)
+			table->ents[index] = val;
+	}
+}
+```
+
+
+
+
+
+netif_receive_skb_internal里面调用get_rps_cpu得到要有效的要发往的CPU后接下来调用enqueue_to_backlog发往对应的CPU软中断去处理：
+
+![image-20230404160113788](net.assets/image-20230404160113788.png)
+
+enqueue_to_backlog函数会先调用skb_flow_limit判断流的个数是否超过当前CPU软中断处理的限制，即
+
+/sys/class/net/eth0/queues/rx-0/rps_flow_cnt
+
+如果超过则丢掉。
+
+
+
+```
+enqueue_to_backlog调用____napi_schedule唤醒接收软中断执行net_rx_action，但注意此时传入的struct napi_struct是backlog，backlog在net_dev_init初始化时将poll指向了process_backlog函数：
+```
+
+
+
+```
+11627  static int __init net_dev_init(void)
+11628  {
+......
+11648  	/*
+11649  	 *	Initialise the packet receive queues.
+11650  	 */
+11651  
+11652  	for_each_possible_cpu(i) {
+11653  		struct work_struct *flush = per_cpu_ptr(&flush_works, i);
+11654  		struct softnet_data *sd = &per_cpu(softnet_data, i);
+......
+11670  		init_gro_hash(&sd->backlog);
+11671  		sd->backlog.poll = process_backlog;//backlog的类型是struct napi_struct
+11672  		sd->backlog.weight = weight_p;
+11673  	}
+......
+11692  	open_softirq(NET_TX_SOFTIRQ, net_tx_action);
+11693  	open_softirq(NET_RX_SOFTIRQ, net_rx_action);//注册接收软中断
+......
+11701  }
+11702  
+11703  subsys_initcall(net_dev_init);
+```
+
+
+
+因此在net_rx_action一路往下调到poll时就回调了process_backlog：
+
+
+
+
+
+### xdp
+
+
+
+
+### 
+
+
+
+
+
+
+
+### 优化方向
+
+
+
+https://server.51cto.com/article/692813.html
+
+https://www.cnblogs.com/charlieroro/p/14047183.html
+
+
+
+1.优化poll函数本身实现，例如借助DMA减少拷贝
+
+2.可根据实际情况修改如下三个参数进行优化以提高网卡性能：
+netdev_budget                 一次接收软中断最多处理多少个数据包
+netdev_budget_usecs       一次接收软中断最多持续多少时间
+struct napi_struct.weight   一次poll操作最多处理多少个数据包。
+
+一次软接收中断在net_rx_action中的for循环中可以调用多次poll进行处理
+
+weight小于等于网卡的某个ringbuf所能保存的最大数据包个数
+
+
+
+RPS设置：
+
+RPS指定哪些接收队列需要通过rps平均到配置的cpu列表上。
+
+/sys/class/net/(dev)/queues/rx-(n)/rps_cpus
+
+
+
+RFS设置：
+
+每个队列的数据流表总数可以通过下面的参数来设置：
+
+该值设置成rps_sock_flow_entries/N,其中Ｎ表示设备的接收队列数量。
+
+```
+sudo bash -c 'echo 2048 > /sys/class/net/eth0/queues/rx-0/rps_flow_cnt'
+```
+
+
+
+全局数据流表(rps_sock_flow_table)的总数，红帽是建议设置成32768，一般设置成最大并发链接数量
+
+cat /proc/sys/net/core/rps_sock_flow_entries
+sysctl -w net.core.rps_sock_flow_entries=32768
+
+
+
+
+
+
+
+## MAC地址
+
+
+参考 https://blog.csdn.net/u014044624/article/details/122919164
+
+```
+#define NETDEV_HW_ADDR_T_LAN        1    // Local Area Network，局域网内唯一。
+#define NETDEV_HW_ADDR_T_SAN        2    // Storage Area Network，来自网卡EEPROM，全球唯一，
+#define NETDEV_HW_ADDR_T_SLAVE      3    //
+#define NETDEV_HW_ADDR_T_UNICAST    4    // Unicast
+#define NETDEV_HW_ADDR_T_MULTICAST  5    // Multicast
+
+struct net_device {
+    struct netdev_hw_addr_list  uc;
+    struct netdev_hw_addr_list  mc;
+    struct netdev_hw_addr_list  dev_addrs;
+    
+    unsigned char       *dev_addr;
+    unsigned char       broadcast[MAX_ADDR_LEN];
+}
+
+
+alloc_netdev_mqs -》 dev_addr_init把dev->dev_addr指向dev->dev_addrs链表的第一个节点，这个节点的类型是NETDEV_HW_ADDR_T_LAN
+实际在alloc_netdev_mqs/register_netdev之后，ifconfig eth up回调net_device_ops->ndo_open时，ndo_open一般会用NETDEV_HW_ADDR_T_SAN类型的MAC地址填充dev->dev_addr，
+此时相当于修改了dev->dev_addrs链表的第一个节点，且使用NETDEV_HW_ADDR_T_SAN MAC来充当NETDEV_HW_ADDR_T_LAN MAC
+
+如果驱动支持net_device_ops->ndo_set_mac_address且通过ifconfig ether xx:xx:xx:xx:xx下发了用户指定的NETDEV_HW_ADDR_T_LAN类型的MAC地址
+则在ndo_open时需要使用用户指定的NETDEV_HW_ADDR_T_LAN类型的MAC地址去填充dev->dev_addr
+
+
+rx时可能需要屏蔽非本机的其他MAC地址，__dev_set_rx_mode的驱动实现函数需要通过设置寄存器去屏蔽除dev->uc和dev->mc外其他的mac地址。这是dev->uc和dev->mc唯一的作用。
+```
+
+
+
+
+
+![image-20230301171047414](net.assets/image-20230301171047414.png)
+
+
+
+
+
+
+# 四. 无线网卡
 
 
 

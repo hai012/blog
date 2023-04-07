@@ -1,0 +1,349 @@
+静态编译
+ CFLAGS += -fsanitize=address -fsanitize-recover=address -U_FORTIFY_SOURCE -fno-omit-frame-pointer -fno-common
+ LFLAGS += -fsanitize=address -static-libasan
+静态编译后运行
+export ASAN_OPTIONS=halt_on_error=0:detect_leaks=1:log_path=/tmp/asan.log:log_exe_name=1
+./RUSW_APP.out &
+
+
+
+
+
+
+
+
+
+
+
+
+cd /home/haijie.gong/project/MPSOC_COMM_5GNR_64_RU_APP
+vim Makefile +141  #开启gcc ASAN支持，修改/加入如下内容
+CFLAGS += -g1 -Wno-unused-but-set-variable -O1
+CFLAGS += -fno-common -fsanitize=address  -fno-omit-frame-pointer
+LFLAGS += -lasan
+
+
+
+
+
+
+
+
+
+
+
+
+编译并替换RUSW_APP
+make clean -j32 && make RF4442d_13A_config -j32 && make -j32
+cp OutPut/RUSW_APP.out  ~/project/UpdatedCpriZun/System/OS/RFS/RFSROOM/ZUN/RF4442D-13A/usr/local/app/RUSW_APP.out
+
+往RFS里面添加开启ASAN后RU_APP依赖的libasan.so
+cd ~/project/UpdatedCpriZun/System/OS/RFS/RFSROOM/
+asanlib=$(/opt/plnx/plnx-v18.1/tools/linux-i386/aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc --print-file-name libasan.so)
+cp          $asanlib       ZUN/RF4442D-13A/usr/local/app/libasan.so
+echo "F:0:0:755:ZUN/RF4442D-13A/usr/local/app/libasan.so:C:T:"  >> ~/project/UpdatedCpriZun/System/OS/RFS/RFSROOM/FileList/ZUN.RF4442D-13A.FileList
+
+
+vim ZUN/RF4442D-13A/etc/init.d/sec.app.sh #配置RUSW_APP启动前的启动环境,修改/加入如下内容
+echo "##########################RUSW_APP debug################################"
+cd /usr/local/app/
+ASAN_OPTIONS=detect_invalid_pointer_pairs=1
+ASAN_OPTIONS=detect_stack_use_after_return=1
+ASAN_OPTIONS=detect_leaks=1
+ASAN_OPTIONS=help=1
+#export LD_PRELOAD=/usr/local/app/libasan.so
+./RUSW_APP.out &
+#export LD_PRELOAD=""
+
+
+
+
+
+构建RFS
+cd ~/project/UpdatedCpriZun/System/OS/RFS/RFSROOM/
+./mkrfs_zun.sh build ZUN RF4442D-13a
+
+
+
+
+
+
+
+
+
+
+
+/opt/plnx/plnx-v18.1/tools/linux-i386/aarch64-linux-gnu/bin/aarch64-linux-gnu-gdb  -x  init.gdb  $elf_exutable_file    -q -nw 
+
+
+
+
+
+
+set osabi GNU/Linux
+set auto-solib-add on
+set print thread-events off
+set print pretty on
+set print frame-arguments all
+core xilinx-zcu102-2021.1/ramdump.elf
+set sysroot ../android11/out/target/product/rk356x_rock_3a_r/symbols
+dir ../android11
+set solib-search-path ./
+source C:/GtoTtool/main.py
+quit
+set substitute-path /root/petalinux  /home/haijie.gong/petalinux/zcu102
+
+
+
+sys.path.append("C:\GtoTtool")
+import BuildScript
+
+if __name__ == '__main__':
+    trace32_script = BuildScript.Gen_Script()
+    trace32_script.gen_debuginfo_and_srcipt()
+	
+
+
+
+
+
+
+
+
+
+
+
+# uncompyle6 version 3.8.0
+# Python bytecode 3.7.0 (3394)
+# Decompiled from: Python 3.10.4 (tags/v3.10.4:9d38120, Mar 23 2022, 23:13:41) [MSC v.1929 64 bit (AMD64)]
+# Embedded file name: E:\BUG\symbols\BuildScript.py
+# Compiled at: 2021-09-22 13:51:54
+# Size of source mod 2**32: 11064 bytes
+
+#  BytesIO  StringIO
+
+import gdb, sys, string, re
+from io import BytesIO
+
+class Gen_Script:
+    proc_maps = 0
+    proc_regs = 0
+    debug_trace32 = 0
+    current_tid = 0
+
+    def __init__(self):
+        self.proc_maps = open('proc_maps', 'w+')
+        self.proc_regs = BytesIO()
+        self.current_tid = BytesIO()
+        self.debug_trace32 = open('debug.cmm', 'w+')
+
+    def get_value_nonempty(self, list_of_strings, num):
+        first = 1
+        for s in list_of_strings:
+            if s:
+                if first == num:
+                    return s
+                first = first + 1
+
+        return ''
+
+    def debug_trace32_symbol_load(self):
+        self.proc_maps.seek(0, 0)
+        self.proc_regs.seek(0, 0)
+        line = self.proc_maps.readline()
+        while line.find('Start Addr') == -1:
+            line = self.proc_maps.readline()
+
+        line = self.proc_maps.readline()
+		preFile = ''
+        while line:
+            if line.find('/dev/') != -1:
+                line = self.proc_maps.readline()
+                continue
+            if line.find('/dmabuf:') != -1:
+                line = self.proc_maps.readline()
+                continue
+            if line.find('/SYSV') != -1:
+                line = self.proc_maps.readline()
+                continue
+            Offset = self.get_value_nonempty(line.split(' '), 4)
+            if Offset == '0x0':
+                start_ddr = self.get_value_nonempty(line.split(' '), 1)
+                objfile = self.get_value_nonempty(line.split(' '), 5)
+                objfile = objfile.split('/')[(-1)]
+				if objfile != preFile
+					preFile = objfile
+					self.debug_trace32.write('if os.file("' + objfile.replace('\n', '') + '")\n')
+					self.debug_trace32.write('   d.load.e ' + objfile.replace('\n', '') + ' ' + start_ddr + ' /nc \n')
+            line = self.proc_maps.readline()
+
+        self.debug_trace32.write('if os.file("PROCESS_COREDUMP")\n')
+        self.debug_trace32.write('  d.load.e PROCESS_COREDUMP  /nc  /ny \n')
+
+    def debug_trace32_core_load(self):
+        core_info = BytesIO()
+        info_files = gdb.execute('info files', to_string=True)
+        core_info.write(info_files)
+        core_info.seek(0, 0)
+        line = core_info.readline()
+        while line:
+            if line.find('Local core dump file') != -1:
+                line = core_info.readline()
+                subline = line.split("'")[0]
+                core_name = subline.split('/')[(-1)]
+                self.debug_trace32.write('if os.file("' + core_name.replace('\n', '') + '")\n')
+                self.debug_trace32.write('   d.load.e ' + core_name.replace('\n', '') + ' /nc  /ny\n')
+                break
+            line = core_info.readline()
+
+        core_info.close()
+
+    def debug_trace32_srcipt_title(self):
+        self.debug_trace32.write('; The file is automatically generated by offline_debug tool\n')
+        self.debug_trace32.write('do ~~/t32.cmm\n')
+        self.debug_trace32.write('sys.res\n')
+        self.debug_trace32.write('sys.cpu CortexA55\n')
+        self.debug_trace32.write('sys.u\n\n')
+        self.debug_trace32.write('sYmbol.SourcePATH.SetBaseDir ../android11\n\n\n')
+
+    def debug_trace32_thread_regtitle(self):
+        self.debug_trace32.write('menu.rp\n')
+        self.debug_trace32.write('(\n')
+        self.debug_trace32.write('\tadd\n')
+        self.debug_trace32.write('\tmenu\n')
+        self.debug_trace32.write('\t(\n')
+        self.debug_trace32.write('\t\tpopup "Threads"\n')
+        self.debug_trace32.write('\t\t(\n')
+        self.debug_trace32.write('\t\t\tdefault\n')
+
+    def debug_trace32_register(self, line):
+        reg_name = self.get_value_nonempty(line.split(' '), 1)
+        reg_value = self.get_value_nonempty(line.split(' '), 2)
+        if reg_name != 'fpsr':
+            if reg_name != 'fpcr':
+                if reg_name != 'fpscr':
+                    self.debug_trace32.write('\t\t\t\tr.s ' + reg_name + ' ' + reg_value + '\n')
+
+    def debug_trace32_current_register(self, line):
+        reg_name = self.get_value_nonempty(line.split(' '), 1)
+        reg_value = self.get_value_nonempty(line.split(' '), 2)
+        if reg_name != 'fpsr':
+            if reg_name != 'fpcr':
+                if reg_name != 'fpscr':
+                    self.current_tid.write('r.s ' + reg_name + ' ' + reg_value + '\n')
+
+    def debug_trace32_current_register_set(self):
+        self.debug_trace32.write('\n\n\n')
+        self.current_tid.seek(0, 0)
+        line = self.current_tid.readline()
+        while line:
+            self.debug_trace32.write(line)
+            line = self.current_tid.readline()
+
+        self.debug_trace32.write('enddo\n')
+
+    def debug_trace32_thread_regend(self):
+        self.debug_trace32.write('\t\t)\n')
+        self.debug_trace32.write('\t)\n')
+        self.debug_trace32.write(')\n\n\n')
+        self.debug_trace32.write('per.s spr:0x30200 %q 0x0000008000000000\n')
+        self.debug_trace32.write('per.s spr:0x30202 %q 0x32B5193519\n')
+        self.debug_trace32.write('per.s spr:0x30100 %l 0x4C5D93D\n')
+
+    def debug_trace32_all_threads_reg(self):
+        self.debug_trace32_thread_regtitle()
+        line = self.proc_regs.readline()
+        while line:
+            if line.find('thread id:') != -1:
+                tid = re.sub('\\D', '', line)
+                if line.find('current_thread id:') != -1:
+                    self.debug_trace32.write('\t\t\tmenuitem "current:' + tid + '"\n')
+                    self.debug_trace32.write('\t\t\t(\n')
+                    line = self.proc_regs.readline()
+                    while line.strip():
+                        self.debug_trace32_register(line)
+                        self.debug_trace32_current_register(line)
+                        line = self.proc_regs.readline()
+
+                    self.debug_trace32.write('\t\t\t)\n')
+                else:
+                    self.debug_trace32.write('\t\t\tmenuitem "' + tid + '"\n')
+                    self.debug_trace32.write('\t\t\t(\n')
+                    line = self.proc_regs.readline()
+                    while line.strip():
+                        self.debug_trace32_register(line)
+                        line = self.proc_regs.readline()
+
+                    self.debug_trace32.write('\t\t\t)\n')
+            line = self.proc_regs.readline()
+
+        self.debug_trace32_thread_regend()
+        self.debug_trace32.write('\n\n\n')
+
+    def debug_trace32_window_show(self):
+        self.debug_trace32.write('setup.v %h.on %s.on %y.on\n')
+        self.debug_trace32.write('wclear\n')
+        self.debug_trace32.write('wpos 0% 0% 50% 100%\n')
+        self.debug_trace32.write('w.v.f /a /l\n')
+        self.debug_trace32.write('wpos 50% 0%\n')
+        self.debug_trace32.write('w.r\n')
+        self.debug_trace32.write('wpos 50% 30%\n')
+        self.debug_trace32.write('d.l\n')
+
+    def generate_proc_maps_regs(self):
+        proc_threadinfo = BytesIO()
+        proc_backtrace = open('proc_backtrace', 'w+')
+        maps = gdb.execute('info proc mappings', to_string=True)
+        self.proc_maps.write(maps)
+        threadinfo = gdb.execute('info threads', to_string=True)
+        proc_threadinfo.write(threadinfo)
+        proc_threadinfo.seek(0, 0)
+        line = proc_threadinfo.readline()
+        while line:
+            if line.find('LWP') != -1:
+                t_id = re.sub('\\D', '', line.split('LWP')[0])
+                tid = self.get_value_nonempty(line.split('LWP')[1].split(' '), 1)
+                if line.startswith('*'):
+                    current_t_id = t_id
+                    self.proc_regs.write('current_thread id:' + tid + '\n')
+                    proc_backtrace.write('*Exception Thread:')
+                else:
+                    self.proc_regs.write('thread id:' + tid + '\n')
+                thread = gdb.execute(('thread ' + t_id), to_string=True)
+                tid_regs = gdb.execute('info reg', to_string=True)
+                self.proc_regs.write(tid_regs)
+                self.proc_regs.write('\n')
+                proc_backtrace.write('thread id:' + tid + '\n')
+                tid_backtrace = gdb.execute('bt', to_string=True)
+                #tid_backtrace = gdb.execute('bt -frame-arguments all', to_string=True)
+                proc_backtrace.write(tid_backtrace)
+                proc_backtrace.write('\n')
+            line = proc_threadinfo.readline()
+
+        thread = gdb.execute(('thread ' + current_t_id), to_string=True)
+        proc_backtrace.close()
+        proc_threadinfo.close()
+        self.proc_maps.seek(0, 0)
+        self.proc_regs.seek(0, 0)
+
+    def generate_trace32_srcipt(self):
+        self.debug_trace32_srcipt_title()
+        self.debug_trace32_symbol_load()
+        self.debug_trace32_core_load()
+        self.debug_trace32_all_threads_reg()
+        self.debug_trace32_window_show()
+        self.debug_trace32_current_register_set()
+
+    def gen_debuginfo_and_srcipt(self):
+        self.generate_proc_maps_regs()
+        self.generate_trace32_srcipt()
+        self.proc_maps.close()
+        self.proc_regs.close()
+        self.debug_trace32.close()
+        self.current_tid.close()
+
+
+if __name__ == '__main__':
+    trace32_script = Gen_Script()
+    trace32_script.gen_debuginfo_and_srcipt()
+# okay decompiling BuildScript.pyc

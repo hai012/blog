@@ -46,15 +46,15 @@ ln -s ../../../rk3568/android11   rk3568
 
 8、构建脚本用于同步源码
 #!/bin/bash
-export OPENGROK_TOMCAT_BASE=/home/ghj/work/opengrok/apache-tomcat-8.5.76
-export OPENGROK_SRC_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/src
-export OPENGROK_DATA_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/data
-java \
-     -jar /home/ghj/work/opengrok/opengrok-1.3.16/lib/opengrok.jar \
-     -c /home/ghj/work/opengrok/universal_ctags/ctags \
-     -s /home/ghj/work/opengrok/opengrok-1.3.16/src \
-     -d /home/ghj/work/opengrok/opengrok-1.3.16/data -P -S \
-     -W /home/ghj/work/opengrok/opengrok-1.3.16/etc/configuration.xml
+export OPENGROK_TOMCAT_BASE=/home/haijie.gong/tools/opengrok/apache-tomcat-8.5.76
+export OPENGROK_SRC_ROOT=/home/haijie.gong/tools/opengrok/src
+export OPENGROK_DATA_ROOT=/home/haijie.gong/tools/opengrok/data
+java -Xmx12g\
+     -jar /home/haijie.gong/tools/opengrok/opengrok-1.3.16/lib/opengrok.jar \
+     -c /home/haijie.gong/tools/opengrok/ctags \
+     -s $OPENGROK_SRC_ROOT \
+     -d $OPENGROK_DATA_ROOT -P -S \
+     -W $OPENGROK_DATA_ROOT/configuration.xml
 
 
 9、构建脚本用于启动tomcat
@@ -62,7 +62,39 @@ java \
 export OPENGROK_TOMCAT_BASE=/home/ghj/work/opengrok/apache-tomcat-8.5.76
 export OPENGROK_SRC_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/src
 export OPENGROK_DATA_ROOT=/home/ghj/work/opengrok/opengrok-1.3.16/data
-/home/ghj/work/opengrok/apache-tomcat-8.5.76/bin/startup.sh
+/home/haijie.gong/tools/opengrok/apache-tomcat-8.5.76/bin/startup.sh
 
 注，高版本组合例如tomcat9+opengrok最新版+jdk11可以设置如下环境变量指向configuration.xml
 OPENGROK_READ_XML_CONFIGURATION
+
+注意开启win10上面的  大小写区分   路径长度限制   符号链接权限
+
+
+需要预先安装git工具，在环境变量里能找得到
+
+jdk-17.0.4.1
+ctags最新
+
+opengrok-1.7.36
+apache-tomcat-10.0.26
+apache-tomcat-10.1.0
+
+apache-tomcat-10.0.13
+opengrok-1.7.24
+
+apache-tomcat-10.0.8
+opengrok-1.7.13
+
+
+
+
+JAVA_HOME				C:\jdk-19
+CLASSPATH				.;%JAVA_HOME%\lib;%JAVA_HOME%\lib\dt.jar;%JAVA_HOME%\lib\tools.jar
+CATALINA_HOME			C:\opengrok\apache-tomcat-10.0.27
+OPENGROK_TOMCAT_BASE	C:\opengrok\apache-tomcat-10.0.27
+OPENGROK_DATA_ROOT		C:\opengrok\data
+OPENGROK_SRC_ROOT		Z:\opengrok_src
+
+PATH
+%JAVA_HOME%\bin
+C:\opengrok\ctags

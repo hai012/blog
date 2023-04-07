@@ -1,3 +1,44 @@
+# qemu源码安装
+
+
+
+```
+//下载qemu
+git clone https://git.qemu.org/git/qemu.git
+cd qemu
+git submodule init
+git submodule update --recursive
+
+
+
+安装依赖
+apt install re2c
+apt install ninja-build
+apt install build-essential zlib1g-dev pkg-config libglib2.0-dev
+aptinstall binutils-dev libboost-all-dev autoconf libtool libssl-dev libpixman-1-dev libpython-dev python-pip python-capstone virtualenv
+apt install libpixman-1-dev
+apt install bison flex
+apt install meson
+apt install libpixman-1-dev
+apt install libpcap-dev libnids-dev libnet1-dev
+apt install libattr1-dev
+apt install libcap-ng-dev
+apt install libslirp-dev
+
+
+mkdir build
+
+../configure --help
+
+../configure  --target-list="arm-softmmu arm-linux-user" --enable-debug --enable-sdl --enable-tools --disable-curl  --enable-slirp
+
+sudo make install
+```
+
+
+
+
+
 
 
 
@@ -22,6 +63,12 @@ apt install flex
 apt-get install libelf-dev
 apt-get install libgmp-dev
 apt install libmpc-dev
+
+ apt install libssl-dev
+
+apt install bc
+
+
 
 
 
@@ -73,7 +120,7 @@ root@ubunntu:/# echo "nameserver 114.114.114.114"  >>  /etc/resolv.conf
 root@ubunntu:/# apt update
 root@ubunntu:/# apt upgrade
 root@ubunntu:/# apt install language-pack-en-base apt-utils net-tools iputils-ping
-iputils-tracepath isc-dhcp-client openssh-server curl vim
+iputils-tracepath isc-dhcp-client openssh-server curl vim dialog debconf
 2.安装systemd init
 root@ubunntu:/# apt install systemd
 root@ubunntu:/# ln -s /lib/systemd/systemd /sbin/init
@@ -83,6 +130,13 @@ root@ubunntu:/# systemctl disable systemd-resolved.service
 注意安装systemd后systemd-resolved.service会把/etc/resolv.conf 变成链接脚本指向其他文件，此时DNS解析会失败，这里关掉systemd-resolved后需要进行第0步配置DNS才能访问网络。
 4.配置登录tty
 root@ubunntu:/# ln -s /lib/systemd/system/getty@.service  /etc/systemd/system/getty.target.wants/getty@ttyS0.service
+
+
+systemctl get-default
+systemctl set-default multi-user.target
+systemctl list-dependencies multi-user.target
+
+
 5.启动rc-local开机自动DHCP
 root@ubunntu:/# echo "[Install]"                  >> /lib/systemd/system/rc-local.service
 root@ubunntu:/# echo "WantedBy=multi-user.target" >> /lib/systemd/system/rc-local.service
@@ -116,21 +170,37 @@ C:\qemu\qemu-system-x86_64.exe
 
 qemu-system-x86_64 -M help
 
-qemu-system-x86_64  -accel help
+C:\qemu\qemu-system-x86_64  -accel help
 
 qemu-system-x86_64 -device help
 
 
 
+性能顺序 kvm, xen, *hax*, hvf, nvmm, *whpx* ,tcg
+
+选项参考
+
+https://www.bilibili.com/read/cv12752511
+
 
 
 # 模拟  arm vexpress开发板
+
+https://www.qemu.org/docs/master/system/arm/vexpress.html
+
+
 
 https://mirrors.edge.kernel.org/pub/linux/kernel/v5.x/linux-5.15.73.tar.xz
 
 http://mirrors.ustc.edu.cn/ubuntu-cdimage/ubuntu-base/releases/focal/release/ubuntu-base-20.04.5-base-armhf.tar.gz
 
-apt install qemu-user-static
+
+
+arm官方交叉编译工具链：
+
+wget   https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/10.3-2021.07/binrel/gcc-arm-10.3-2021.07-x86_64-arm-none-linux-gnueabihf.tar.xz
+
+wget  https://armkeil.blob.core.windows.net/developer/Files/downloads/gnu-a/10.3-2021.07/binrel/gcc-arm-10.3-2021.07-x86_64-aarch64-none-linux-gnu.tar.xz
 
 
 
@@ -143,14 +213,42 @@ ghj@ubunntu:~/work/qemu/linux-5.15.73$ make -j8 vexpress_defconfig
 ghj@ubunntu:~/work/qemu/linux-5.15.73$ make -j8 menuconfig  #打开
 
 ghj@ubunntu:~/work/qemu/linux-5.15.73$ make -j8 zImage
-ghj@ubunntu:~/work/qemu/linux-5.15.73$ make dtbs
+ghj@ubunntu:~/work/qemu/linux-5.15.73$ make vexpress-v2p-ca9.dtb
+ghj@ubunntu:~/work/qemu/linux-5.15.73$ make vexpress-v2p-ca15-tc1.dtb
+
 ghj@ubunntu:~/work/qemu/linux-5.15.73$ make modules
 ghj@ubunntu:~/work/qemu/linux-5.15.73$ make modules_install INSTALL_MOD_PATH=XXXXX
+
+
+注意，高版本内核例如6.1.15需要打开CONFIG_UEVENT_HELPER选项才能使用busybox的mdev
+
+  │ Symbol: UEVENT_HELPER [=n]                                                                                     │
+  │ Type  : bool                                                                                                   │
+  │ Defined at drivers/base/Kconfig:7                                                                              │
+  │   Prompt: Support for uevent helper                                                                            │
+  │   Location:                                                                                                    │
+  │     -> Device Drivers                                                                                          │
+  │       -> Generic Driver Options                                                                                │
+  │ (1)     -> Support for uevent helper (UEVENT_HELPER [=n]) 
+  
+  
+  
+    │ Symbol: EARLY_PRINTK [=n]                                                                                      │
+  │ Type  : bool                                                                                                   │
+  │ Defined at arch/arm/Kconfig.debug:1928                                                                         │
+  │   Prompt: Early printk                                                                                         │
+  │   Depends on: DEBUG_LL [=n]                                                                                    │
+  │   Location:                                                                                                    │
+  │     -> Kernel hacking                                                                                          │
+  │ (1)   -> arm Debugging                                                                                         │
+  │         -> Early printk (EARLY_PRINTK [=n]) 
 ```
 
 
 
 ## 构建根文件系统
+
+* ubuntu
 
 ```
 ghj@ubunntu:~/work/qemu$          mkdir mnt
@@ -225,6 +323,80 @@ root@ubunntu:/# ln -s /lib/systemd/system/getty@.service  /etc/systemd/system/ge
 
 
 
+* busybox
+
+  ```
+  wget https://busybox.net/downloads/busybox-1.36.0.tar.bz2
+  tar  jxf busybox-1.36.0.tar.bz2
+  cd busybox-1.36.0
+  export ARCH=arm
+  export CROSS_COMPILE=/home/haijie.gong/tools/gcc-arm-10.3-2021.07-x86_64-arm-none-linux-gnueabihf/bin/arm-none-linux-gnueabihf-
+  make -j16 distclean
+  make -j16 defconfig
+  make -j16 menuconfig
+  make -j16 
+  make -j16 install
+  cd ..
+  
+  mkdir rootfs
+  dd if=/dev/zero of=rootfs.ext4 bs=1G count=1
+  mkfs.ext4 rootfs.ext4
+  
+  su root
+  mount rootfs.ext4 rootfs
+  cp -rd busybox-1.36.0/_install/* rootfs/
+  cd rootfs
+  mkdir  dev  etc  home  lib   mnt  proc  root   sys  tmp   var
+  ls ../busybox-1.36.0/examples/
+  cp ../busybox-1.36.0/examples/*  etc
+  mkdir usr/share
+  mv etc/udhcp usr/share/udhcpc
+  
+  cat etc/inittab
+  mkdir etc/init.d
+  
+  echo '
+  mount -t proc   proc   /proc
+  mount -t sysfs  sysfs  /sys
+  mount -t tmpfs  tmpfs  /tmp
+  mount -t tmpfs  tmpfs  /dev
+  mkdir /dev/pts
+  mount -t devpts devpts /dev/pts
+  echo /sbin/mdev>/proc/sys/kernel/hotplug
+  mdev -s
+  ifconfig eth0 up
+  udhcpc -i eth0 -s /usr/share/udhcpc/simple.script
+  ' > etc/init.d/rcS
+  
+  echo '
+  #!/bin/sh
+  export HOSTNAME=farsight
+  export USER=root
+  export HOME=root
+  export PS1="[$USER@$HOSTNAME \W]\# "
+  #export PS1="[\[\033[01;32m\]$USER@\[\033[00m\]\[\033[01;34m\]$HOSTNAME\[\033[00m\ \W]\$ "
+  PATH=/bin:/sbin:/usr/bin:/usr/sbin
+  LD_LIBRARY_PATH=/lib:/usr/lib:$LD_LIBRARY_PATH
+  export PATH LD_LIBRARY_PATH
+  ' > etc/profile
+  
+  cd .. && umount rootfs
+  ```
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## qemu启动
 
 
@@ -263,6 +435,24 @@ https://wiki.qemu.org/Documentation/Networking
 
 
 
+
+
+```
+qemu-system-arm -M vexpress-a9  -accel tcg,thread=multi -cpu cortex-a9  -smp 4  -m 1G -kernel /home/haijie.gong/disk/mynet/linux-6.1.15/arch/arm/boot/zImage -dtb /home/haijie.gong/disk/mynet/linux-6.1.15/arch/arm/boot/dts/vexpress-v2p-ca9.dtb -nographic -serial mon:stdio   -append "console=ttyAMA0 rootfstype=ext4 root=/dev/mmcblk0  rw rootwait init=/sbin/init  loglevel=8"  -drive  file=/home/haijie.gong/disk/mynet/busybox/rootfs.ext4,format=raw,id=mysdcard -device sd-card,drive=mysdcard  -nic user
+```
+
+
+
+```
+qemu-system-arm -M vexpress-a15  -accel tcg,thread=multi -cpu cortex-a15 -smp 2  -m 1G -kernel /home/haijie.gong/disk/mynet/linux-6.1.15/arch/arm/boot/zImage -dtb /home/haijie.gong/disk/mynet/linux-6.1.15/arch/arm/boot/dts/vexpress-v2p-ca15-tc1.dtb -nographic -serial mon:stdio   -append "console=ttyAMA0 rootfstype=ext4 root=/dev/mmcblk0  rw rootwait init=/sbin/init  loglevel=8"  -drive  file=/home/haijie.gong/disk/mynet/busybox/rootfs.ext4,format=raw,id=mysdcard -device sd-card,drive=mysdcard  -nic user
+```
+
+
+
+
+
+
+
 # 构建initrd/initramfs
 
 ## initrd
@@ -294,3 +484,139 @@ find . | cpio -o -H newc | gzip > ../initramfs.cpio.gz
 
 
 也可以选择直接在编译内核时将填充好的当前文件夹作为initramfs打包到内核镜像中
+
+
+
+# qemu源码分析
+
+
+
+http://wiki.100ask.org/Qemu
+
+
+
+
+
+
+
+
+
+
+
+```
+#define TYPE_MYNET "mynet"
+#define mynet(obj) OBJECT_CHECK(mynet_state, (obj), "mynet")
+
+typedef struct {
+    SysBusDevice parent_obj;
+    MemoryRegion mmio;
+    qemu_irq irq;
+    xxxxx
+} mynet_state
+
+static void mynet_class_init(ObjectClass *klass, void *data)
+{
+    DeviceClass *dc = DEVICE_CLASS(klass);
+    //printf("mynet_class_init\n");
+    dc->realize = mynet_realize;
+}
+
+static const TypeInfo mynet_info = {
+    .name          = TYPE_MYNET,
+    .parent        = TYPE_SYS_BUS_DEVICE,
+    .instance_init = xxx_func,
+    .instance_size = sizeof(mynet_state),
+    .class_init    = mynet_class_init,
+};
+
+
+static void mynet_register_types(void)
+{
+    type_register_static(&mynet_info);
+}
+type_init(mynet_register_types)
+
+
+void mynet_init(hwaddr base, qemu_irq irq)
+{
+    DeviceState *dev;
+    SysBusDevice *s;
+
+    dev = qdev_create(NULL, TYPE_MYNET);//instance_init
+    qdev_init_nofail(dev);//realize
+
+    s = SYS_BUS_DEVICE(dev);
+    sysbus_mmio_map(s, 0, base);
+    sysbus_connect_irq(s, 0, irq);
+}
+```
+
+
+
+```
+type_init
+
+把TypeInfo变成TypeImpl放入type_table链表中
+```
+
+
+
+
+
+
+
+
+
+```
+qdev_create
+	qdev_try_create
+		object_new
+			object_new_with_type
+				    type_initialize(type);//TypeImpl->class为空则创建class并回调class_init
+    				obj = g_malloc(type->instance_size);//分配instance结构体，即mynet_state
+    				object_initialize_with_type(obj, type->instance_size, type);
+    					type_initialize//TypeImpl->class不为空则直接返回
+    					object_init_with_type//回调instance_init
+
+
+                	
+                	
+
+
+
+qdev_init_nofail
+	object_property_set_bool(OBJECT(dev), true, "realized", &err);
+		......
+			回调class_init中设置的realize函数mynet_realize;
+```
+
+高版本已经废弃qdev_create/qdev_init_nofail
+
+
+
+
+
+
+
+```
+sysbus_init_child_obj
+	object_initialize_child
+		object_initialize_childv(parentobj, propname, childobj, size, type, errp,vargs);
+			object_initialize(childobj, size, type);
+				TypeImpl *type = type_get_by_name(typename);
+				object_initialize_with_type(data, size, type);
+    					type_initialize//为空则创建class并回调class_init,否则直接返回
+    					object_init_with_type//回调instance_init
+
+
+
+
+
+
+object_property_set_bool
+```
+
+
+
+
+

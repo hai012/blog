@@ -155,7 +155,15 @@ GPIO控制器的分发函数负责读取GPIO控制器的寄存器确定GPIO中�
 
 handle_edge_irq函数和handle_level_irq函数**不同点：**
 
-**二者最大的不同在于对中断线屏蔽的处理以及对handle_irq_event函数的调用次数。handle_edge_irq调用handle_irq_event函数时irq_desc结构体节点对应的该中断线处于未屏蔽状态，在一个do while循环中不断调handle_irq_event函数，只要中断线被屏蔽未屏蔽且irq_desc结构体节点处于IRQS_PENDING状态(处于该状态意味着在处理中断时该中断又发生了一次)就一直调。而handle_level_irq在调用handle_irq_event之前就已经调用了mask_ack_irq()函数屏蔽了中断线，只调一次handle_irq_event，且调完了再调cond_unmask_irq来开启中断线。**
+**二者最大的不同在于对中断线屏蔽的处理以及对handle_irq_event函数的调用次数。handle_edge_irq调用handle_irq_event函数时irq_desc结构体节点对应的该中断线处于未屏蔽状态，在一个do while循环中不断调handle_irq_event函数，只要中断线被屏蔽未屏蔽且irq_desc结构体节点处于IRQS_PENDING状态(处于该状态意味着在CPUA处理中断时该中断又发生了一次边缘跳变，CPUB处理后面的这次跳变时CPUA还未处理完于是设置IRQS_PENDING状态)就一直调。而handle_level_irq在调用handle_irq_event之前就已经调用了mask_ack_irq()函数屏蔽了中断线，只调一次handle_irq_event，且调完了再调cond_unmask_irq来开启中断线。**
+
+
+
+
+
+处理中断的CPU处于关所有中断的状态，如果某个CPU处理时该irq中断未屏蔽，此时该中断再次触发后其他CPU可以响应此中断。
+
+
 
 
 
@@ -306,6 +314,10 @@ doc_and_source_for_drivers\IMX6ULL\doc_pic\08_Interrupt\04_Linux中断系统中�
 
 ### 4.注册中断上半部中断处理函数
 
+free_irq卸载中断
+
+
+
 
 
 irq_desc结构体中的name是虚拟中断名称。
@@ -346,6 +358,10 @@ https://zhuanlan.zhihu.com/p/145908094
 
 
 
+
+
+
+
 https://www.ktanx.com/blog/p/2456
 
 安卓平台定义了CONFIG_IRQ_FORCED_THREADING 宏，如今所有的softirq都在ksoftirqd内核线程的栈中运行。
@@ -379,7 +395,63 @@ NR_SOFTIRQS
 };
 ```
 
-提交一个softirq需要调用raise_softirq函数，raise_softirq调用raise_softirq_irqoff，该函数将相应软中断标识为pending、完成软中断提交。
+使用以上枚举值作为open_softirq的第一个参数注册软中断，open_softirq的第二个函数指针指向具体的软中断处理函数
+
+```
+713  void open_softirq(int nr, void (*action)(struct softirq_action *))
+714  {
+715  	softirq_vec[nr].action = action;
+716  }
+```
+
+
+
+提交一个softirq执行需要调用raise_softirq函数，raise_softirq调用raise_softirq_irqoff，该函数将当前CPU私有数据中相应软中断标识为pending、完成软中断提交。
+
+```
+697  void raise_softirq(unsigned int nr)
+698  {
+699  	unsigned long flags;
+700  
+701  	local_irq_save(flags);
+702  	raise_softirq_irqoff(nr);
+703  	local_irq_restore(flags);
+704  }
+
+680  inline void raise_softirq_irqoff(unsigned int nr)
+681  {
+682  	__raise_softirq_irqoff(nr);
+683  
+684  	/*
+685  	 * If we're in an interrupt or softirq, we're done
+686  	 * (this also catches softirq-disabled code). We will
+687  	 * actually run the softirq once we return from
+688  	 * the irq or softirq.
+689  	 *
+690  	 * Otherwise we wake up ksoftirqd to make sure we
+691  	 * schedule the softirq soon.
+692  	 */
+693  	if (!in_interrupt() && should_wake_ksoftirqd())
+694  		wakeup_softirqd();
+695  }
+
+706  void __raise_softirq_irqoff(unsigned int nr)
+707  {
+708  	lockdep_assert_irqs_disabled();
+709  	trace_softirq_raise(nr);
+710  	or_softirq_pending(1UL << nr);
+711  }
+
+495  #define or_softirq_pending(x)	(__this_cpu_or(local_softirq_pending_ref, (x)))
+```
+
+
+
+
+
+
+
+
 
 **标识为pending的软中断可在以下时机得到处理**：
 
@@ -389,27 +461,98 @@ NR_SOFTIRQS
 
 3. 显式地在线程上下文调用do_softirq，如果ksoftirqd未run，则在线程的上下文调用__do_softirq进行处理，否则还是由ksoftirqd处理。
 
+   
+
+同一种软中断可以在两个cpu上同时执行，很可能造成冲突，所以软中断必须设计为可重入的函数（允许多个CPU同时操作），因此也需要使用自旋锁来保护其数据结构。
+
+**同一种softirq可以同时在不同CPU上处理，但负责执行回调softirq_vec[nr].action的CPU和调用raise_softirq提交执行请求的CPU必须是同一个CPU。**
+
+
+
+softirq_vec[nr].action指向的函数内不能休眠、阻塞。
+
 
 
 
 
 **tasklet**
 
+
+
 tasklet基于softirq实现，其本质也是softirq，对应softirq枚举类型中的HI_SOFTIRQ和TASKLET_SOFTIRQ，HI_SOFTIRQ优先级较高。
 
-相比softirq，即使相同类型的softirq也可同时在不同的cpu上处理，而相同类型的tasklet不可同时在不同cpu上处理，不同类型的tasklet可以。
 
-可通过tasklet_schedule或tasklet_hi_schedule提交tasklet，这两个函数最终调用raise_softirq_irqoff提交软中断。
+
+可通过 tasklet_schedule 或 tasklet_hi_schedule 提交tasklet，这两个函数最终调用raise_softirq_irqoff提交软中断。
+
+
 
 因tasklet提交的同样是软中断，所以还是由do_softirq函数完成tasklet的处理。
 
-tasklet_init
-
-tasklet_schedule
-
-具体用法参考《linux设备驱动开发  马厄迪 pdf》156页。
 
 
+tasklet_init/tasklet_schedule具体用法参考《linux设备驱动开发  马厄迪 pdf》156页。
+
+
+
+tasklet内不能休眠、阻塞。提交tasklet执行请求和执行tasklet回调函数都在同一个CPU上。
+
+
+
+相比softirq，即使相同类型的softirq也可同时在不同的cpu上处理，而**相同类型的tasklet不可同时在不同cpu上处理，不同类型的tasklet可以。一种特定类型的tasklet只能串行执行**。多个不同类型的tasklet可以并行在多个CPU上。软中断是静态分配的，在内核编译好之后，就不能改变。但tasklet就灵活许多，可以在运行时改变（比如添加模块时）。
+
+
+
+
+
+```
+通过tasklet_init初始化一个tasklet结构体
+840  void tasklet_init(struct tasklet_struct *t,
+841  		  void (*func)(unsigned long), unsigned long data)
+842  {
+843  	t->next = NULL;
+844  	t->state = 0;
+845  	atomic_set(&t->count, 0);
+846  	t->func = func;
+847  	t->use_callback = false;
+848  	t->data = data;
+849  }
+850  EXPORT_SYMBOL(tasklet_init);
+
+
+//tasklet_schedule或tasklet_hi_schedule提交tasklet执行请求，这两个函数最终调用raise_softirq_irqoff提交软中断。
+//如果tasklet结构体state的bit TASKLET_STATE_SCHED 为1，则tasklet_schedule相当于啥也不干直接返回。
+//否则将tasklet结构体state的bit TASKLET_STATE_SCHED 从0设置为1，并调用__tasklet_schedule
+//这意味着一个tasklet结构体中的func处理函数只能串行。在CPUA上调用tasklet_schedule并在CPUA的软中断处理回调func完成后，在其他CPU或CPUA上继续调用tasklet_schedule时才能调得到__tasklet_schedule去继续触发软中断执行func。
+661  static inline void tasklet_schedule(struct tasklet_struct *t)
+662  {  
+663  	if (!test_and_set_bit(TASKLET_STATE_SCHED, &t->state))
+664  		__tasklet_schedule(t);
+665  }
+666  
+
+745  void __tasklet_schedule(struct tasklet_struct *t)
+746  {
+747  	__tasklet_schedule_common(t, &tasklet_vec,
+748  				  TASKLET_SOFTIRQ);
+749  }
+
+729  static void __tasklet_schedule_common(struct tasklet_struct *t,
+730  				      struct tasklet_head __percpu *headp,
+731  				      unsigned int softirq_nr)
+732  {
+733  	struct tasklet_head *head;
+734  	unsigned long flags;
+735  
+736  	local_irq_save(flags);
+737  	head = this_cpu_ptr(headp);
+738  	t->next = NULL;
+739  	*head->tail = t;
+740  	head->tail = &(t->next);
+741  	raise_softirq_irqoff(softirq_nr);
+742  	local_irq_restore(flags);
+743  }
+```
 
 
 
@@ -418,6 +561,10 @@ tasklet_schedule
 
 
 ### 5.工作队列及kworker内核线程
+
+工作队列中的函数处在进程上下文中，它可以睡眠，也能被阻塞，能够在不同的进程间切换，以完成不同的工作。可延迟函数和工作队列都不能访问用户的进程空间，可延时函数在执行时不可能有任何正在运行的进程，工作队列的函数有内核进程执行，他不能访问用户空间地址。
+
+
 
 创建结构体，填充数据，并将该结构体交给kworker内核线程来处理。
 
