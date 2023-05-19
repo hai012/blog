@@ -3073,17 +3073,44 @@ sk_tx_queue_get返回的是struct sock sk里面的sk_tx_queue_mapping.
 
 
 
-如果是作为server创建套接字后先收包再发包，则根据rx queue index(通过sk_rx_queue_get得到，收包时网络协议栈里会调用sk_rx_queue_set保存rx queue index)在xps_maps[XPS_RXQS]中映射得到tx queue index
-
-
-
-如果是作为clientc创建套接字后先发包，则根据发送这个skb的CPU index在xps_maps[XPS_CPUS]中映射得到tx queue index，skb->sender_cpu存放的值是发送该skb的CPU index + 1，因此line 4039需要减1减回来。
-
 
 
 ![image-20230302175954125](net.assets/image-20230302175954125.png)
 
+line4019~line4020 开启CONFIG_XPS但未配置rx queue/cpu mask时直接在line 2020 return -1
 
+line4023~line4024如果配置了CPU mask但未配置rx queue mask则跳转至get_cpus_map
+
+line4026~line4033处理根据rx queue选择tx queue的情况，如果是作为server创建套接字后先收包再发包，在line4028就能通过sk_rx_queue_get得到获得合法的rx queue index(收包时网络协议栈里会调用sk_rx_queue_set保存rx queue index),接着调用__get_xps_queue_idx把rx queue index根据xps_maps[XPS_RQS]映射成txq，如果rxq to txq失败则执行到到get_cpus_map
+
+
+
+line4035~line4047处理根据send cpu index选择tx queue的情况。如果是作为client创建套接字后先发包，则根据发送这个skb的CPU index在xps_maps[XPS_CPUS]中映射得到tx queue index，skb->sender_cpu存放的值是发送该skb的CPU index + 1，因此line 4039需要减1减回来。
+
+
+
+__get_xps_queue_idx
+
+dev_maps参数是传入的dev->xps_maps[XPS_RQS]或dev->xps_maps[XPS_CPUS],
+
+tci参数是传入的rx queue index或send cpu index
+
+![image-20230406181307157](net.assets/image-20230406181307157.png)
+
+
+
+获取txq主要在line3999~line4003,大致有如下关系，根据skb的hash得到map->queues[]的索引，然后根据索引返回map->queues[]里的元素：
+
+```
+tc = dev->prio_tc_map[skb->priority & TC_BITMASK]
+
+index = (rx queue index or send cpu index) * dev->num_tc   +  tc
+
+map = dev->xps_maps[XPS_XXXS]->attr_map[index]
+map->queues[
+reciprocal_scale(skb_get_hash(skb), map->len)
+]
+```
 
 
 
@@ -3093,15 +3120,15 @@ xps_maps[XPS_CPUS] 对应的配置文件是/sys/class/net/ens3/queues/tx-0/xps_c
 
 
 
-__netif_set_xps_queue
+__netif_set_xps_queue函数将对这两个节点的mask配置转化成dev->xps_maps[XPS_XXXS]->attr_map[]->queues[],
 
 
 
+__netif_set_xps_queue函数能够处理dev->num_tc==0(网卡没有硬件tx流量控制功能)或大于0(网卡有硬件tx流量控制功能)的情况
 
+https://www.cnblogs.com/ouyangxibao/articles/12577177.html
 
-![image-20230406181307157](net.assets/image-20230406181307157.png)
-
-
+![img](net.assets/1596429-20200326203450210-673332684.png)
 
 
 
@@ -3192,11 +3219,19 @@ int main(int argc, char *argv[]){
 
 ####  skb_tx_hash
 
-
+如果xps未开启或没有获得tx queue，则使用skb_tx_hash获得txq
 
 ![image-20230406161847449](net.assets/image-20230406161847449.png)
 
+line3172~line3183如果netdev支持硬件tc,则根据硬件tx与skb->priority的映射关系找txq，否则使用skb hash直接搞一个txq。
 
+```
+#if(dev->num_tc)
+tc = dev->prio_tc_map[skb->priority & TC_BITMASK]
+reciprocal_scale(skb_get_hash(skb), dev->tc_to_txq[tc].offset ) + dev->tc_to_txq[tc].count
+#else
+reciprocal_scale(skb_get_hash(skb), dev->real_num_tx_queues) + 0;
+```
 
 
 
@@ -3240,6 +3275,22 @@ __dev_queue_xmit 中调用netdev_core_pick_tx获取netdev_queue(可以认为是Q
 
 
 
+* 
+
+![image-20230510140611297](net.assets/image-20230510140611297.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
 * qdisc_run其实就是qdisc_run_begin、__qdisc_run、qdisc_run_end的封装。
 
 ![image-20230306143901054](net.assets/image-20230306143901054.png)
@@ -3262,6 +3313,20 @@ qdisc_run_begin 检查 qdisc 是否设置了 RUNNING 状态位。如果设置了
 
 
 
+
+
+
+
+![image-20230510140407608](net.assets/image-20230510140407608.png)
+
+
+
+![image-20230510155143438](net.assets/image-20230510155143438.png)
+
+
+
+
+
 * Qdisc(pfifo_fast_ops)队列缺省设置了TCQ_F_NOLOCK标志，且在init初始化时指定了TCQ_F_CAN_BYPASS标志。
 
 ![image-20230306143521889](net.assets/image-20230306143521889.png)
@@ -3277,6 +3342,16 @@ qdisc_run_begin 检查 qdisc 是否设置了 RUNNING 状态位。如果设置了
 
 
 ### sch_direct_xmit
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -3821,7 +3896,7 @@ static int __init net_dev_init(void)
 
 
 
-
+![image-20230410163342218](net.assets/image-20230410163342218.png)
 
 
 
@@ -3997,6 +4072,7 @@ napi_gro_receive->napi_skb_finish->...->netif_receive_skb_internal->如果是__n
 
 
                      netif_receive_skb->netif_receive_skb_internal->可能会调__netif_receive_skb
+                     
 
                                                                 process_backlog->__netif_receive_skb
 ```
@@ -4005,9 +4081,182 @@ napi_gro_receive->napi_skb_finish->...->netif_receive_skb_internal->如果是__n
 
 
 
+
+
+#### 
+
+
+
+
+
+
+
+
+
 ### receive
 
+
+
+SKB分配:
+
+以下函数均未涉及skb_shared_info中的frags和frag_list，如果要使用参考alloc_skb_with_frags函数
+
+```
+同时分配skb和skb->head
+dev_alloc_skb/netdev_alloc_skb
+napi_alloc_skb
+
+
+
+支持DMA的网卡一般不会同时分配skb和skb->head，初始化时首先申请一个page，将其放入rx ring,接收poll函数里面使用该page构建一个skb然后丢入网络协议栈。
+
+
+
+
+netdev_alloc_frag申请一个page，如果处于中断环境且当前CPU的所有中断被禁用则从this_cpu_ptr(&this_cpu_ptr)分配page,否则从this_cpu_ptr(&napi_alloc_cache)->page分配page
+
+
+build_skb时分配一个skb，并将传入的page地址作为skb->head。skb = kmem_cache_alloc(skbuff_head_cache, GFP_ATOMIC);
+
+napi_alloc_frag申请一个page，从this_cpu_ptr(&napi_alloc_cache)->page分配page
+
+napi_build_skb，skb来源参考napi_skb_cache_get，如果this_cpu_ptr(&napi_alloc_cache)->skb_cache[]中没有skb则通过kmem_cache_alloc_bulk(skbuff_head_cache,...)分配skb(这种情况用unlikely分支去处理，如果skb_cache中经常没有skb则使用napi_build_skb CPU就会经常有分支错误惩罚)，否则skb_cache[]中有skb就返回skb_cache中的skb。
+
+napi_consume_skb，释放skb->head  skb_shared_info,但不释放skb所占内存,把skb内存地址通过napi_skb_cache_put放入this_cpu_ptr(&napi_alloc_cache)->skb_cache[]，skb_cache最多缓存64个skb，满了之后就删掉一部分。
+
+
+netdev_alloc_frag与napi_alloc_frag只是返回的page来源不同，且使用环境不同
+build_skb与napi_build_skb只是返回的skb本身的内存来源不同，两者任何环境都能使用。具体参考
+Documentation/vm/page_frags.rst
+The network stack uses two separate caches per CPU to handle fragment
+allocation.  The netdev_alloc_cache is used by callers making use of the
+netdev_alloc_frag and __netdev_alloc_skb calls.  The napi_alloc_cache is
+used by callers of the __napi_alloc_frag and __napi_alloc_skb calls.  The
+main difference between these two calls is the context in which they may be
+called.  The "netdev" prefixed functions are usable in any context as these
+functions will disable interrupts, while the "napi" prefixed functions are
+only usable within the softirq context.
+napi前缀版本函数的出现是为了提高cache命中率，跟percpu相关。如果在线程上下文的内核态需要使用带napi前缀的函数且不在软中断环境中，则需要使用local_bh_disable/local_bh_enable手动关软中断抢占，以免发生重入。
+```
+
+skb释放：
+
+```
+以下函数负载释放skb，不能运行在中断上半部，如果要在中断上半部则需使用其带irq后缀的版本
+SKB异常释放，释放skb->head  skb_shared_info,并直接释放skb所占内存：
+786  void kfree_skb(struct sk_buff *skb)
+787  {
+788  	/* ANDROID: only still present to preserve the ABI, this went away in
+789  	 * mainline and LTS releases, to be replaced with an inline version
+790  	 * instead.
+791  	 */
+792  	kfree_skb_reason(skb, SKB_DROP_REASON_NOT_SPECIFIED);
+793  }
+771  void kfree_skb_reason(struct sk_buff *skb, enum skb_drop_reason reason)
+772  {
+773  	if (!skb_unref(skb))
+774  		return;
+775  
+776  	trace_android_vh_kfree_skb(skb);
+777  	trace_kfree_skb(skb, __builtin_return_address(0), reason);
+778  	__kfree_skb(skb);
+779  }
+
+
+SKB正常释放，释放skb->head  skb_shared_info,并直接释放skb所占内存：
+#define dev_kfree_skb(a)	consume_skb(a)
+
+1146  #ifdef CONFIG_TRACEPOINTS
+            924  void consume_skb(struct sk_buff *skb)
+            925  {
+            926  	if (!skb_unref(skb))
+            927  		return;
+            928  
+            929  	trace_consume_skb(skb);
+            930  	__kfree_skb(skb);
+            931  }
+932  EXPORT_SYMBOL(consume_skb);
+933  #endif
+1148  #else
+1149  static inline void consume_skb(struct sk_buff *skb)
+1150  {
+1151  	return kfree_skb(skb);
+1152  }
+1153  #endif
+
+真正释放skb的函数：
+755  void __kfree_skb(struct sk_buff *skb)
+756  {
+757  	skb_release_all(skb);//free skb->head
+758  	kfree_skbmem(skb);//  kmem_cache_free(skbuff_head_cache, skb);
+759  }
+```
+
+部分函数调用流程：
+
+```
+dev_alloc_skb
+    netdev_alloc_skb
+        __netdev_alloc_skb
+        	__alloc_skb
+        		skb = kmem_cache_alloc_node(cache, gfp_mask & ~GFP_DMA, node);
+        		data = kmalloc_reserve(size, gfp_mask, node, &pfmemalloc);
+        		__build_skb_around
+        	or
+        	data = page_frag_alloc(this_cpu_ptr(&napi_alloc_cache.page), len, gfp_mask);
+        	__build_skb
+        		skb = kmem_cache_alloc(skbuff_head_cache, GFP_ATOMIC);
+	        	__build_skb_around
+
+	napi_alloc_skb
+		__napi_alloc_skb
+			__alloc_skb
+				skb = napi_skb_cache_get();
+				data = kmalloc_reserve(size, gfp_mask, node, &pfmemalloc);
+				__build_skb_around
+			or
+			data = page_frag_alloc(this_cpu_ptr(&napi_alloc_cache).page, len, gfp_mask);
+			__napi_build_skb
+				skb = napi_skb_cache_get();
+				__build_skb_around
+
+napi_alloc_frag
+	__napi_alloc_frag_align(fragsz, ~0u)
+		__alloc_frag_align
+             page_frag_alloc_align(this_cpu_ptr(napi_alloc_cache.page), fragsz, gfp_mask, align_mask)
+```
+
+
+
+
+
+
+
+
+
 * napi_gro_receive
+
+
+
+
+
+
+
+* napi_gro_frags
+
+如果要用napi_gro_frags版本来进行gro，则需要通过napi_get_frags预先分配skb
+
+可参考 drivers/net/tun.c           tun_get_user/tun_napi_alloc_frags
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4015,9 +4264,25 @@ napi_gro_receive->napi_skb_finish->...->netif_receive_skb_internal->如果是__n
 
 ![image-20230404150239447](net.assets/image-20230404150239447.png)
 
-网卡驱动接收时在软中断回调poll函数，poll函数里调用napi_gro_receive/netif_receive_skb，开启CONFIG_RPS选项后接收函数会间接调到get_rps_cpu函数选择要把接收的skb交给哪个CPU的软中断去处理，如果选择失败则在当前CPU的软中断调用__netif_receive_skb去处理接收到的skb，否则则调用enqueue_to_backlog交给对应
+网卡驱动接收时在软中断回调poll函数，poll函数里调用napi_gro_receive/netif_receive_skb，开启CONFIG_RPS选项后接收函数会间接调到get_rps_cpu函数选择要把接收的skb交给哪个CPU的软中断去处理，如果选择失败则在当前CPU的软中断调用__netif_receive_skb去处理接收到的skb，否则则调用enqueue_to_backlog交给对应CPU的软中断去处理
 
 ![image-20230404150326129](net.assets/image-20230404150326129.png)
+
+* netif_rx
+
+![image-20230410163009834](net.assets/image-20230410163009834.png)
+
+![image-20230410163038690](net.assets/image-20230410163038690.png)
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4201,6 +4466,8 @@ netif_receive_skb_internal里面调用get_rps_cpu得到要有效的要发往的C
 
 ![image-20230404160113788](net.assets/image-20230404160113788.png)
 
+
+
 enqueue_to_backlog函数会先调用skb_flow_limit判断流的个数是否超过当前CPU软中断处理的限制，即
 
 /sys/class/net/eth0/queues/rx-0/rps_flow_cnt
@@ -4242,14 +4509,13 @@ enqueue_to_backlog调用____napi_schedule唤醒接收软中断执行net_rx_actio
 
 
 
-因此在net_rx_action一路往下调到poll时就回调了process_backlog：
+因此在net_rx_action一路往下调到poll时就回调了process_backlog，process_backlog里面调用__netif_receive_skb把skb丢入网络协议栈：
 
-
+![image-20230410162731295](net.assets/image-20230410162731295.png)
 
 
 
 ### xdp
-
 
 
 

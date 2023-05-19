@@ -370,6 +370,55 @@ https://www.ktanx.com/blog/p/2456
 
 Linux内核在启动时会根据CPU数量开启一些线程，这些线程的名字都叫做ksoftirqd/n，其中n是一个整数，从0开始。有几个CPU，就会有几个ksoftirad/n线程
 
+![image-20230516173657378](linux中断处理.assets/image-20230516173657378.png)
+
+
+
+![image-20230516173845313](linux中断处理.assets/image-20230516173845313.png)
+
+
+
+![image-20230516173933113](linux中断处理.assets/image-20230516173933113.png)
+
+![image-20230516175017380](linux中断处理.assets/image-20230516175017380.png)
+
+![image-20230516175226823](linux中断处理.assets/image-20230516175226823.png)
+
+注意，在__do_softirq里面调用了softirq_handle_begin和softirq_handle_end，二者作用分别是禁用抢占
+
+![image-20230516180618798](linux中断处理.assets/image-20230516180618798.png)
+
+
+
+local_bh_disable/local_bh_enable的作用跟softirq_handle_begin和softirq_handle_end效果类似，都是关抢占，在其他线程中使用local_bh_disable/local_bh_enable来关软中断抢占。
+
+```
+17  static inline void local_bh_disable(void)
+18  {
+19  	__local_bh_disable_ip(_THIS_IP_, SOFTIRQ_DISABLE_OFFSET);
+20  }
+
+30  static inline void local_bh_enable(void)
+31  {
+32  	__local_bh_enable_ip(_THIS_IP_, SOFTIRQ_DISABLE_OFFSET);
+33  }
+```
+
+
+
+\_\_local_bh_disable_ip 和 \_\_local_bh_enable_ip 实现如下，都是操作preempt count，preempt count只有为0时在调度点才会调度到其他线程。
+
+```
+include/linux/bottom_half.h
+10  static __always_inline void __local_bh_disable_ip(unsigned long ip, unsigned int cnt)
+11  {
+12  	preempt_count_add(cnt);
+13  	barrier();
+14  }
+```
+
+![image-20230516180929886](linux中断处理.assets/image-20230516180929886.png)
+
 
 
 **softirq**
@@ -703,6 +752,18 @@ request_threaded_irq
 
 
 ### 7.中断相关函数
+
+
+
+`local_bh_disable `禁用下半部分(softirqs)的处理.Softirq可以在中断返回路径上处理，也可以通过ksoftirqd-(每个cpu)线程处理，如果系统承受大量softirq负载，则该线程将被唤醒.
+
+`preempt_disable `禁用抢占，这意味着，当线程在` preempt_disable `<-> `preemt_enable `范围内执行时，它将不会由调度程序进入睡眠状态.这意味着，如果当前线程在该作用域内时发生system-timer-interrupt，则它可能会更新调度程序的帐户表，但不会将上下文切换到另一个线程.这包括softirqd.
+
+`local_irq_disable `或` local_irq_save `禁用本地CPU的中断.这意味着本地cpu将不会对任何irq作出反应，因此它将不会运行任何中断返回路径，因此无法在其中运行softirqs.
+
+
+
+
 
 
 
