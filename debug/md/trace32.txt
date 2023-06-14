@@ -1,0 +1,42 @@
+-m phys_offset=0x00200000 -m  kimage_voffset=0xffffffc010000000
+
+1468  union thread_union {
+1469  #ifndef CONFIG_THREAD_INFO_IN_TASK
+1470  	struct thread_info thread_info;
+1471  #endif
+1472  	unsigned long stack[THREAD_SIZE/sizeof(long)];
+1473  };
+
+39  struct thread_info {
+40  	unsigned long		flags;		/* low level flags */
+41  	mm_segment_t		addr_limit;	/* address limit */
+42  #ifdef CONFIG_ARM64_SW_TTBR0_PAN
+43  	u64			ttbr0;		/* saved TTBR0_EL1 */
+44  #endif
+45  	int			preempt_count;	/* 0 => preemptable, <0 => bug */
+46  };
+
+union thread_union init_thread_union __init_task_data = {
+	INIT_THREAD_INFO(init_task)
+};
+
+48  #define INIT_THREAD_INFO(tsk)						\
+49  {									\
+50  	.preempt_count	= INIT_PREEMPT_COUNT,				\
+51  	.addr_limit	= KERNEL_DS,					\
+52  }
+
+
+
+
+226  #define INIT_TASK(tsk)	\
+227  {									\
+228  	INIT_TASK_TI(tsk)						\
+229  	.state		= 0,						\
+230  	.stack		= init_stack,					\
+......
+}
+
+#define init_stack		(init_thread_union.stack)
+
+

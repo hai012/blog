@@ -1,0 +1,80 @@
+
+
+###get_xps_queue
+tc = dev->prio_tc_map[skb->priority & TC_BITMASK]
+
+tcindex = skb->sendercpu-1 or rx queue index
+
+tci = tcidex *   dev->num_tc   +  tc
+
+
+map = dev->xps_maps[XPS_RXQS]->attr_map[tci]
+
+
+map->queues[
+reciprocal_scale(skb_get_hash(skb), map->len)
+]
+
+
+
+###__netif_set_xps_queue
+根据txq找到在tc_to_txq[tc]的索引tc
+tc = netdev_txq_to_tc(dev, tx_queue_index);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###skb_tx_hash
+
+#if(dev->num_tc)
+tc = dev->prio_tc_map[skb->priority & TC_BITMASK]
+reciprocal_scale(skb_get_hash(skb), dev->tc_to_txq[tc].offset ) + dev->tc_to_txq[tc].count
+#else
+reciprocal_scale(skb_get_hash(skb), dev->real_num_tx_queues) + 0;
+
+
+
+
+
+
+
+dev->tc_to_txq[i]只在dev->num_tc!=0时才使用，拥有offload tx queue
+dev->tc_to_txq[0].offset=0
+dev->tc_to_txq[0].count=3//3个txq用于tc0
+
+dev->tc_to_txq[1].offset=3
+dev->tc_to_txq[1].count=2//2个txq用于tc1
+
+dev->tc_to_txq[2].offset=5
+dev->tc_to_txq[2].count=5//5个txq用于tc2
+.。。。。。
+dev->tc_to_txq[5].offset=12
+dev->tc_to_txq[5].count=3
+每个tc有多少txq取决于硬件
+1个tc对应多个txq
+
+
+
+
+
+
+4556  static inline u16 skb_get_queue_mapping(const struct sk_buff *skb)
+4557  {
+4558  	return skb->queue_mapping;
+4559  }

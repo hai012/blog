@@ -1,0 +1,150 @@
+C:\GtoTtool\android-ndk-r13\prebuilt\windows-x86_64\bin\gdb.exe
+C:\Xilinx2018\SDK\2018.3\gnu\aarch64\nt\aarch64-linux\bin\aarch64-linux-gnu-gdb.exe
+C:\GtoTtool\GenT32Script.bat Z:\test\b
+
+
+C:\GtoTtool\android-ndk-r13\prebuilt\windows-x86_64\bin\gdb.exe -x c:\GtoTtool\init.gdb --args D:\caseSensitive\aaa\UShell -q -nw   
+
+
+set osabi GNU/Linux
+set auto-solib-add on
+set print thread-events off
+set print pretty on
+set print frame-arguments all
+core xilinx-zcu102-2021.1/ramdump.elf
+
+dir ../android11    /////   set substitute-path
+set solib-search-path ./
+set sysroot ../android11/out/target/product/rk356x_rock_3a_r/symbols
+
+
+(gdb) info proc mappings
+Mapped address spaces:
+
+          Start Addr           End Addr       Size     Offset objfile
+      0xaaaacd78a000     0xaaaacd78b000     0x1000        0x0 /root/test/a
+      0xaaaacd79a000     0xaaaacd79b000     0x1000        0x0 /root/test/a
+      0xaaaacd79b000     0xaaaacd79c000     0x1000     0x1000 /root/test/a
+      0xffff8215a000     0xffff822b5000   0x15b000        0x0 /usr/lib/aarch64-linux-gnu/libc-2.31.so
+      0xffff822b5000     0xffff822c4000     0xf000   0x15b000 /usr/lib/aarch64-linux-gnu/libc-2.31.so
+      0xffff822c4000     0xffff822c8000     0x4000   0x15a000 /usr/lib/aarch64-linux-gnu/libc-2.31.so
+      0xffff822c8000     0xffff822ca000     0x2000   0x15e000 /usr/lib/aarch64-linux-gnu/libc-2.31.so
+      0xffff822cd000     0xffff822ee000    0x21000        0x0 /usr/lib/aarch64-linux-gnu/ld-2.31.so
+      0xffff822fe000     0xffff822ff000     0x1000    0x21000 /usr/lib/aarch64-linux-gnu/ld-2.31.so
+(gdb) info threads
+  Id   Target Id         Frame
+* 1    LWP 514472        0x0000aaaacd78a72c in main () at a.c:6
+(gdb)
+
+
+
+thread  + t_idz(t_idz就是info threads输出的第一列，即在GDB中的线程编号，第三列才是PID)
+(gdb) thread 1
+[Switching to thread 1 (LWP 514472)]
+#0  0x0000aaaacd78a72c in main () at a.c:6
+6       *a=1;
+(gdb)
+
+
+
+
+
+
+
+
+
+
+
+
+; @Doc: DDI0487A_h_armv8_arm.pdf (2015-09-15)
+;       fcm_trm_100453_0000_04_en (2016-05-27)
+;       IHI0069A_gic_architecture_specification.pdf (2015-06)
+;       cortex_a55_trm_100442_0100_00_en.pdf (2017-06-23)             ARM CPU手册（TRM）
+;       DDI0487B_a_armv8_arm.pdf (2017-03-31)                         系统架构手册（ARM ARM/ARMv8）
+
+
+
+
+
+
+elif (CORENAME()=="CORTEXA55")
+group.quad spr:0x30200++0x00
+line.quad 0x00 "TTBR0_EL1,Translation Table Base Registers"
+hexmask.quad.word 0x00 48.--63. 1.    " ASID        ,ASID for the translation table base address"
+hexmask.quad      0x00 2.--47. 0x4         "              BADDR[47:2] ,Translation table base address"
+bitfld.quad       0x00 0.                   "  CNP ,Common not Private" "Not supported,Supported"
+
+
+
+
+group.quad spr:0x30202++0x00
+line.quad 0x00 "TCR_EL1,Translation Control Registers"
+bitfld.quad 0x00 50. " HWU162   ,Hardware use of bit[62] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR1_EL1/EL2" "Not possible,Possible"
+bitfld.quad 0x00 49. "              HWU161   ,Hardware use of bit[61] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR1_EL1/EL2" "Not possible,Possible"
+bitfld.quad 0x00 48. "              HWU160   ,Hardware use of bit[60] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR1_EL1/EL2" "Not possible,Possible"
+bitfld.quad 0x00 47. "              HWU159 ,Hardware use of bit[59] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR1_EL1/EL2" "Not possible,Possible"
+textline "                             "
+bitfld.quad 0x00 46. " HWU062   ,Hardware use of bit[62] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR0_EL1/EL2" "Not possible,Possible"
+bitfld.quad 0x00 45. "              HWU061   ,Hardware use of bit[61] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR0_EL1/EL2" "Not possible,Possible"
+bitfld.quad 0x00 44. "              HWU060   ,Hardware use of bit[60] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR0_EL1/EL2" "Not possible,Possible"
+bitfld.quad 0x00 43. "              HWU059 ,Hardware use of bit[59] of the stage1 translation table block or level 3 entry for pages pointed to by TTBR0_EL1/EL2" "Not possible,Possible"
+textline "                             "
+bitfld.quad 0x00 42. " HPD1     ,Hierarchical Permission Disable for the TTBR1 region" "No,Yes"
+bitfld.quad 0x00 41. "                       HPD0     ,Hierarchical Permission Disable for the TTBR0 region" "No,Yes"
+bitfld.quad 0x00 40. "                       HD       ,Hardware Update of the Dirty Bit Enable - Stage 1" "Disabled,Enabled"
+bitfld.quad 0x00 39. "                  HA     ,Hardware Update of the Access Bit Enable - Stage 1" "Disabled,Enabled"
+textline "                             "
+bitfld.quad 0x00 38. " TBI1     ,Top Byte ignored" "Used,Ignored"
+bitfld.quad 0x00 37. "                   TBI0     ,Top Byte ignored" "Used,Ignored"
+bitfld.quad 0x00 36. "                   AS       ,ASID Size" "8 bit,16 bit"
+bitfld.quad 0x00 32.--34. "                    IPS    ,IPASize" "4GByte,64GByte,1TByte,?..."
+textline "                             "
+bitfld.quad 0x00 30.--31. " TG1      ,TTBR1_EL1 Granule size" "Reserved,16KByte,4KByte,64KByte"
+bitfld.quad 0x00 28.--29. "                  SH1      ,Shareability attributes for TTBR1 as described in LPAE" "Non-shareable,Reserved,Outer Shareable,Inner Shareable"
+bitfld.quad 0x00 26.--27. "           ORGN1    ,Outer Cacheability attributes for TTBR1 as described in LPAE" "Outer Non-cacheable,Outer WB WA cacheable,Outer WT cacheable,Outer WB no WA cacheable"
+bitfld.quad 0x00 24.--25. "  IRGN1  ,Inner Cacheability attributes for TTBR1 as described in LPAE" "Inner Non-cacheable,Inner WB WA cacheable,Inner WT cacheable,Inner WB no WA cacheable"
+textline "                             "
+bitfld.quad 0x00 23. " EPD1     ,Translation Table walk disable for TTBR1 as described in LPAE" "No,Yes"
+bitfld.quad 0x00 22. "                       A1       ,ASID definition from TTBR0 or TTBR1" "TTBR0_EL1,TTBR1_EL1"
+bitfld.quad 0x00 16.--21. "                 T1SZ     ,Size offset of the memory region for TTBR1" "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63"
+bitfld.quad 0x00 14.--15. "                        TG0    ,TTBR0_ELx Granule size" "4KByte,64KByte,16KByte,?..."
+textline "                             "
+bitfld.quad 0x00 12.--13. " SH0      ,Shareability attributes for TTBR0 as described in LPAE" "Non-shareable,Reserved,Outer Shareable,Inner Shareable"
+bitfld.quad 0x00 10.--11. "           ORGN0    ,Outer Cacheability attributes for TTBR0 as described in LPAE" "Outer Non-cacheable,Outer WB WA cacheable,Outer WT cacheable,Outer WB no WA cacheable"
+bitfld.quad 0x00 8.--9. "  IRGN0    ,Inner Cacheability attributes for TTBR0 as described in LPAE" "Inner Non-cacheable,Inner WB WA cacheable,Inner WT cacheable,Inner WB no WA cacheable"
+bitfld.quad 0x00 7. "  EPD0   ,Translation Table walk disable for TTBR0 as described in LPAE" "No,Yes"
+textline "                             "
+bitfld.quad 0x00 0.--5. " T0SZ     ,Size offset of the memory region for TTBR0" "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63"
+
+
+
+
+
+elif (CORENAME()=="CORTEXA55")
+group.quad spr:0x30100++0x00
+line.long 0x00 "SCTLR_EL1,System Control Register EL1"
+bitfld.long 0x00 26. "         UCI     ,EL0 access in AArch64 for DC CVAU/ DC CIVAC/ DC CVAC and IC IVAU instructions enable" "Disabled,Enabled"
+bitfld.long 0x00 25. "      EE     ,Exception endianness" "Little,Big"
+bitfld.long 0x00 24. "        E0E     ,Endianness of explicit data accesses at EL0" "Little,Big"
+textline "                         "
+bitfld.long 0x00 23. "          SPAN    ,Set PSTATE.PAN bit on taking an exception to the EL1 exception level" "Reserved,Unchanged"
+bitfld.long 0x00 19. "                          WXN     ,Write permission implies XN (Execute Never)" "Not forced,Forced"
+textline "                         "
+bitfld.long 0x00 18. "          NTWE    ,WFE instruction executed at EL0" "Executed,Not executed"
+bitfld.long 0x00 16. "  NTWI   ,WFI instruction executed at EL0" "Executed,Not executed"
+bitfld.long 0x00 15. "  UCT     ,EL0 access in AArch64 to the CTR_EL0 enable" "Disabled,Enabled"
+textline "                         "
+bitfld.long 0x00 14. "          DZE     ,Access to DC ZVA instruction at EL0" "Prohibited,Allowed"
+bitfld.long 0x00 12. "    I      ,Instruction Cache enable" "Disabled,Enabled"
+bitfld.long 0x00 9. "      UMA     ,User Mask Access. Controls access to interrupt masks from EL0, when EL0 is using AArch64" "Disabled,Enabled"
+textline "                         "
+bitfld.long 0x00 8. "          SED     ,SETEND instruction disable" "No,Yes"
+bitfld.long 0x00 5. "                                CP15BEN ,CP15 Barrier Enable" "Disabled,Enabled"
+textline "                         "
+bitfld.long 0x00 4. "          SA0     ,Stack Alignment Check Enable for EL0" "Disabled,Enabled"
+bitfld.long 0x00 3. "      SA     ,Stack Alignment Check Enable" "Disabled,Enabled"
+bitfld.long 0x00 2. "      C       ,Data/Unified Cache enable" "Disabled,Enabled"
+textline "                         "
+bitfld.long 0x00 1. "          A       ,Alignment Check" "Low,High"
+bitfld.long 0x00 0. "          M      ,MMU Enable" "Disabled,Enabled"
+endif

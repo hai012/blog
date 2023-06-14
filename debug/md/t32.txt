@@ -1,0 +1,113 @@
+<0x0 0x0                0x0 0x80000000>, 
+<0x8 0x00000000         0x0 0x80000000>;
+
+ffffffc01135c000 T idmap_pg_dir
+ffffffc01135f000 T tramp_pg_dir
+ffffffc011360000 T swapper_pg_dir
+ffffffc011ace000 B init_pg_dir
+
+
+init_pg_dir     ffffffc011ace000 - 0xffffffc010000000 = ‭1AC E000‬
+idmap_pg_dir    ffffffc01135c000 - 0xffffffc010000000 = 135 C000‬    0x0000000000335c00   ttbr0_el1
+swapper_pg_dir  ffffffc011360000 - 0xffffffc010000000 = 136 0000‬    0x0000000000336000   ttbr1_el1
+                ffffffc01134f000 - 0xffffffc010000000 = 134 F000
+
+
+tramp_pg_dir    ffffffc01135f000 - 0xffffffc010000000 = 135 F000    
+
+
+
+booti 0x00200000        0x04000000 0x00100000
+0x00200000
+
+
+[    0.000000] swapper_pg_dir:ffffffc01134f000
+[    0.000000] swapper_pg_dir:000000000154f000
+[    0.000000] swapper_pg_dir:000000000154f000
+
+reserved.reg[0x0].end= ‭0x7FF0 0000‬
+
+
+TLB addr    = 0x000000007fee 0000
+FB base     = 0x00000000 7fee 0000
+
+
+relocaddr   = 0x00000000 7fda 1000
+reloc off   = 0x00000000 6fd2 1000
+
+
+fdt_blob    = 0x00000000 7dd1 3010
+new_fdt     = 0x00000000 7dd1 3010
+
+
+irq_sp      = 0x000000007dd1 3000
+sp start    = 0x000000007dd1 3000
+
+
+reserved.reg[0x0].base=0x7dd1 1bf0
+                     
+echo kernel 0x800000000 > /sys/kernel/debug/pid_page_tables
+
+                00000000 101b e1c8     0 OBJECT  GLOBAL DEFAULT   14 __bss_end
+
+
+ZynqMP> bdinfo
+boot_params = 0x0000000000000000
+DRAM bank   = 0x0000000000000000
+-> start    = 0x0000000000000000
+-> size     = 0x000000007ff00000
+DRAM bank   = 0x0000000000000001
+-> start    = 0x0000000800000000
+-> size     = 0x0000000080000000
+flashstart  = 0x0000000000000000
+flashsize   = 0x0000000000000000
+flashoffset = 0x0000000000000000
+baudrate    = 115200 bps
+relocaddr   = 0x000000007fda1000
+reloc off   = 0x000000006fd21000
+Build       = 64-bit
+current eth = ethernet@ff0e0000
+ethaddr     = (not set)
+IP addr     = <NULL>
+fdt_blob    = 0x000000007dd13010
+new_fdt     = 0x000000007dd13010
+fdt_size    = 0x000000000000dd80
+FB base     = 0x000000007fee0000
+lmb_dump_all:
+    memory.cnt             = 0x2
+    memory.size            = 0x0
+    memory.reg[0x0].base   = 0x0
+                   .size   = 0x7ff00000
+    memory.reg[0x1].base   = 0x800000000
+                   .size   = 0x80000000
+
+    reserved.cnt           = 0x1
+    reserved.size          = 0x0
+    reserved.reg[0x0].base = 0x7dd11bf0
+                     .size = 0x21ee410
+arch_number = 0x0000000000000000
+TLB addr    = 0x000000007fee0000
+irq_sp      = 0x000000007dd13000
+sp start    = 0x000000007dd13000
+ARM frequency = 65 MHz
+DSP frequency = 0 MHz
+DDR frequency = 0 MHz
+Early malloc usage: 1428 / 8000
+
+
+
+
+
+qemu-system-aarch64 -M arm-generic-fdt   -serial mon:stdio -serial /dev/null -display none -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/bl31.elf,cpu-num=0 -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/ramdisk.cpio.gz.u-boot,addr=0x04000000,force-raw -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/u-boot.elf -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/Image,addr=0x00200000,force-raw -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/system.dtb,addr=0x00100000,force-raw -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/boot.scr,addr=0x20000000,force-raw -gdb tcp::9000   -net nic -net nic -net nic -net nic,netdev=eth0 -netdev user,id=eth0,tftp=/tftpboot   -hw-dtb /home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/zynqmp-qemu-multiarch-arm.dtb -machine-path /tmp/tmp.93aOZiFeLr -global xlnx,zynqmp-boot.cpu-num=0 -global xlnx,zynqmp-boot.use-pmufw=true  -drive if=sd,format=raw,index=1,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/rootfs.ext4   -m 4G
+
+
+-device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/bl31.elf,cpu-num=0 
+-device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/ramdisk.cpio.gz.u-boot,addr=0x04000000,force-raw 
+-device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/u-boot.elf
+-device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/Image,addr=0x00200000,force-raw 
+-device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/system.dtb,addr=0x00100000,force-raw 
+-device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/boot.scr,addr=0x20000000,force-raw 
+-gdb tcp::9000  -net nic -net nic -net nic -net nic,netdev=eth0 -netdev user,id=eth0,tftp=/tftpboot   
+-hw-dtb /home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/zynqmp-qemu-multiarch-arm.dtb
+-machine-path /tmp/tmp.93aOZiFeLr -global xlnx,zynqmp-boot.cpu-num=0 -global xlnx,zynqmp-boot.use-pmufw=true  
+-drive if=sd,format=raw,index=1,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/rootfs.ext4

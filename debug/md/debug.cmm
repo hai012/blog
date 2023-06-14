@@ -1,0 +1,68 @@
+do ~~/t32.cmm
+sys.res
+sys.cpu CortexA55
+sys.u
+
+sYmbol.SourcePATH.SetBaseDir ../android11
+
+
+d.load.e  core/coredump/ramdump  /nc  /ny
+
+d.load.e  exe/lib    Start_Addr   /nc
+
+
+menu.rp
+(
+	add
+	menu
+	(
+		popup "Threads"
+		(
+			default
+			menuitem "current: tid"
+			(
+			tr.s	x0	0xffffffc01148d950
+			tr.s	x1	0x1
+			...
+			tr.s	x30	0xffffffc010025f10
+			tr.s	sp	0xffffffc011ab3ed0
+			tr.s	pc	0xffffffc010025f18
+			tr.s	cpsr	0x3c5
+			)
+			menuitem "tid"
+			(
+			tr.s	x0	0xffffffc01148d950
+			tr.s	x1	0x1
+			...
+			tr.s	x30	0xffffffc010025f10
+			tr.s	sp	0xffffffc011ab3ed0
+			tr.s	pc	0xffffffc010025f18
+			tr.s	cpsr	0x3c5
+			)
+		)
+	)
+)
+
+
+per.s spr:0x30200 %q 0x0000008000000000
+per.s spr:0x30202 %q 0x32B5193519
+per.s spr:0x30100 %l 0x4C5D93D
+
+
+setup.v %h.on %s.on %y.on
+wclear
+wpos 0% 0% 50% 100%
+w.v.f /a /l
+wpos 50% 0%
+w.r
+wpos 50% 30%
+d.l
+
+
+r.s	x0	0xffffffc01148d950
+r.s	x1	0x1
+...
+r.s	x30	0xffffffc010025f10
+r.s	sp	0xffffffc011ab3ed0
+r.s	pc	0xffffffc010025f18
+r.s	cpsr	0x3c5

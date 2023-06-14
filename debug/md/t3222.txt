@@ -1,0 +1,43 @@
+current_thread id:  tid
+x0             0xffffffc01148d950       -274587920048
+x1             0x1      1
+x2             0xffffffc0118489c0       -274584008256
+x3             0xffffffc0118489b0       -274584008272
+x4             0x1      1
+x5             0x1      1
+x6             0x0      0
+x7             0x0      0
+x8             0xffffff8800400268       -515391880600
+x9             0xffffffc010025f08       -274609316088
+x10            0xffffffc0118a0850       -274583648176
+x11            0x40     64
+x12            0x46     70
+x13            0x1      1
+x14            0x0      0
+x15            0x0      0
+x16            0x0      0
+x17            0x0      0
+x18            0xffffffff1bed0948       -3826448056
+x19            0xffffffc01147d000       -274587987968
+x20            0xffffffc01147d000       -274587987968
+x21            0xffffffc011a0eb40       -274582148288
+x22            0x1      1
+x23            0x1      1
+x24            0xffffffc011955000       -274582908928
+x25            0xffffffc011ab0000       -274581487616
+x26            0xffffffc011ab4000       -274581471232
+x27            0xffffff8802ade880       -515351123840
+x28            0xffffff880027c180       -515393470080
+x29            0xffffffc011ab3ed0       -274581471536
+x30            0xffffffc010025f10       -274609316080
+sp             0xffffffc011ab3ed0       0xffffffc011ab3ed0
+pc             0xffffffc010025f18       0xffffffc010025f18
+cpsr           0x3c5    [ SP EL=2 F I A D ]
+fpsr           0x0      0
+fpcr           0x0      0
+
+
+
+
+
+thread id:   tid
