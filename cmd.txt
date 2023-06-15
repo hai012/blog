@@ -1,0 +1,434 @@
+document.designMode = "on"
+
+
+
+net view \\109.101.66.45
+net use
+net use Y: \\109.101.66.45\haijie.gong 123qwe /user:haijie.gong
+net use Z: /del
+/home/haijie.gong/project/ZYNQ_COMM_LTE_NR
+smbclient -L 109.101.66.45 -U haijie.gong%123qwe
+mount -t cifs //109.101.66.45/haijie.gong   /mnt/samba   -o username=haijie.gong,password=123qwe
+mount -t cifs //109.101.66.40/shpart2   /mnt/shpart2   -o username=SRCSH,password=SRCSH008
+mount -t cifs //109.101.66.40/SHPart   /mnt/shpart   -o username=SRCSH,password=SRCSH008
+
+
+C:\opengrok\apache-tomcat-10.0.26\bin\startup.bat
+C:\opengrok\apache-tomcat-10.0.26\bin\shutdown.bat
+java -Xmx1g -jar C:\opengrok\opengrok-1.7.36\lib\opengrok.jar -W D:\caseSensitive\opengrok_data2\configuration.xml  -P -S -v -m 10240 -d D:\caseSensitive\opengrok_data2 -s D:\caseSensitive\project
+
+D:\disk>C:\qemu\qemu-img create -f raw x64_disk2.raw
+-drive file=D:\disk\x64_disk2.raw,format=raw
+
+
+update_resetreson
+
+
+
+
+
+
+
+
+
+
+mount -t nfs -o nolock,soft,timeo=1 192.168.76.9:/home/haijie.gong /mnt/nfs
+
+C:\qemu\qemu-system-x86_64 --accel hax  -nographic -smp 16 -m 6G -drive file=C:\disk\x64_disk.qcow2,format=qcow2 -drive file=E:\disk\x64_disk.raw,format=raw -drive file=D:\disk\x64_disk2.raw,format=raw -device virtio-net-pci,netdev=net0 -netdev user,id=net0,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22,hostfwd=tcp::8088-:8080
+
+
+
+/home/haijie.gong/tools/opengrok/src/
+
+. build/envsetup.sh && lunch aosp_x86_64-eng && make -j8
+. build/envsetup.sh && lunch sdk_phone_x86_64-eng
+. build/envsetup.sh && lunch sdk_car_x86_64-userdebug
+emulator -no-snapshot -verbose -show-kernel -writable-system -cores 8 -memory 8192
+emulator -accel off  -no-snapshot -verbose -show-kernel -writable-system -cores 8 -memory 8192 -qemu "-accel tgc,thread=multi" 
+
+
+
+export PATH=$PATH:/home/haijie.gong/disk/imx6ull_qemu/ToolChain-6.2.1/bin/
+export ARCH=arm
+export CROSS_COMPILE=arm-linux-gnueabihf-
+make 100ask_imx6ull_qemu_defconfig
+make zImage -j16
+make dtbs
+cp arch/arm/boot/zImage                      /home/haijie.gong/imx_qemu_run/imx6ull-system-image/
+cp arch/arm/boot/dts/100ask_imx6ull_qemu.dtb /home/haijie.gong/imx_qemu_run/imx6ull-system-image/
+
+
+./configure --prefix=$PWD/ --target-list="arm-softmmu arm-linux-user" --enable-debug --enable-sdl --enable-kvm --enable-tools --disable-curl
+make -j16
+cp arm-softmmu/qemu-system-arm /home/haijie.gong/imx_qemu_run/qemu/bin/
+如果在ssh字符终端下要退出QEMU，可以输入ctrl+a 抬起后，再输入'x'
+当你的鼠标点击QEMU的GUI界面时，鼠标将无法移出这个GUI界面。这时可以通过快捷键“Ctrl+Alt+g”把鼠标从GUI界面中退出来。
+
+
+       qemu_net: ethernet@50000000 {
+            compatible = "smsc,lan91c111";
+            reg = <0x50000000 0x4000>;
+            interrupts = <GIC_SPI 121 IRQ_TYPE_LEVEL_HIGH>;
+            status = "disabled";
+        };
+
+各位，今后这个群专门用来讨论大包版本发布的事情，如果是解决了比较关键的问题例如block下一步工作的问题就发版本，如果有发版本的需要可以直接在群里提。
+今天FPGA和FW关于HW PAP问题的修改入库后暂时就不发了，版本太多了IV测不过来。
+
+
+
+
+
+
+
+. /opt/plnx/plnx-v21.1/settings.sh  &&  cd /home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1
+petalinux-boot --qemu  --prebuilt 3
+petalinux-boot --qemu  --prebuilt 3 --qemu-args="-monitor telnet:127.0.0.1:55555,server,nowait"
+ps -u|grep qemu-system-aarch64 |grep -v 'grep'| awk '{print $2}'|xargs kill
+telnet 127.0.0.1 55555
+echo c > /proc/sysrq-trigger
+dump-guest-memory ramdump.elf
+dump-guest-memory [-p] 文件名  起始物理地址    长度
+dump-guest-memory [-z|-l|-s|-w]   文件名
+将客户机内存转储到协议。该文件可以使用崩溃或 gdb 进行处理。如果没有，转储格式为 ELF。-z|-l|-s|-w
+-p  执行分页以获取来宾的内存映射。
+-z  以 kdump 压缩格式转储，使用 zlib 压缩。
+-l  以 kdump 压缩格式转储，使用 lzo 压缩。
+-s  以 kdump 压缩格式转储，具有快速压缩。
+-w  Windows 崩溃转储格式的转储（可用于代替 ELF 转储转换），仅适用于具有 vmcoreinfo 驱动程序的 Windows x64 来宾
+
+arm64 qemu dtb  https://zhuanlan.zhihu.com/p/521196386
+
+
+
+
+
+qemu-system-aarch64 -M arm-generic-fdt   -serial mon:stdio -serial /dev/null -display none -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/bl31.elf,cpu-num=0 -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/ramdisk.cpio.gz.u-boot,addr=0x04000000,force-raw -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/u-boot.elf -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/Image,addr=0x00200000,force-raw -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/system.dtb,addr=0x00100000,force-raw -device loader,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/boot.scr,addr=0x20000000,force-raw -gdb tcp::9000   -net nic -net nic -net nic -net nic,netdev=eth0 -netdev user,id=eth0,tftp=/tftpboot   -hw-dtb /home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/zynqmp-qemu-multiarch-arm.dtb -machine-path /tmp/tmp.93aOZiFeLr -global xlnx,zynqmp-boot.cpu-num=0 -global xlnx,zynqmp-boot.use-pmufw=true  -drive if=sd,format=raw,index=1,file=/home/haijie.gong/petalinux/zcu102/xilinx-zcu102-2021.1/pre-built/linux/images/rootfs.ext4   -m 4G
+
+
+
+vim arch/arm64/boot/dts/xilinx/zynqmp.dtsi +645
+compatible = "cdns,zynqmp-gem", "cdns,gem";
+
+
+
+/lib/systemd/system# grep 'ExecStart=-/sbin/agetty' -nr .
+
+-drive C:\disk\w25q64,id=w25q64Tag0 -device dflash
+-drive file=C:\disk\w25q64,id=w25q64Tag0,format=raw,if=mtd 
+-device usb-net,netdev=net0 -netdev user,id=net0,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22
+-device virtio-net-device,netdev=net0 -netdev user,id=net0,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22
+-device virtio-net-pci,netdev=net0 -netdev user,id=net0,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22
+-nic user,hostfwd=tcp::40222-:22,net=192.168.76.0/24,dhcpstart=192.168.76.9
+//not work   -net user,hostfwd=tcp::4022-:22,net=192.168.76.0/24,dhcpstart=192.168.76.9
+
+
+
+
+modprobe nbd
+qemu-ndb --connect /dev/nbd0 arm64_rootfs.qcow2
+mount /dev/nbd0 mnt
+modprobe nbd &&  qemu-nbd  --connect=/dev/nbd0  /mnt/develop/arm64_rootfs.qcow2 && cd /home/ghj && mount /dev/nbd0 mnt && chroot mnt
+export http_proxy=http://109.101.66.14:8080  && export https_proxy=https://109.101.66.14:8080
+mount -t cifs -o vers=1.0,username=haijie.gong,password=123qwe //109.101.66.45/haijie.gong   /mnt
+ip=192.168.7.2::192.168.7.1:255.255.255.0
+
+
+
+C:\qemu\qemu-system-aarch64 -M xlnx-zcu102 -m 1024 -kernel Z:\develop\arm64_build\arch\arm64\boot\Image   -dtb Z:\develop\arm64_build\arch\arm64\boot\dts\xilinx\zynqmp-zcu102-rev1.0.dtb 
+--append "earlyprintk root=/dev/ram rw  mem=1024M
+-net nic,model=cadence_gem -net user,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22
+-serial null -serial mon:stdio -no-reboot
+
+C:\qemu\qemu-system-aarch64  -nographic  -smp 8 -M virt  -m 12G   -kernel Z:\develop\arm64_build\arch\arm64\boot\Image   Z:\develop\arm64_rootfs.qcow2 -append "noinitrd init=/sbin/init root=/dev/mmcblk0 rw rootwait" -nic user,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+JAVA_HOME				C:\jdk-17.0.4.1
+CLASSPATH				.;%JAVA_HOME%\lib;%JAVA_HOME%\lib\dt.jar;%JAVA_HOME%\lib\tools.jar
+CATALINA_HOME			C:\opengrok\apache-tomcat-10.0.27
+OPENGROK_TOMCAT_BASE	C:\opengrok\apache-tomcat-10.0.27
+OPENGROK_DATA_ROOT		C:\opengrok\data
+OPENGROK_SRC_ROOT		Z:\opengrok_src
+
+PATH
+%JAVA_HOME%\bin
+C:\opengrok\ctags
+
+
+kernel
+export PATH=$PATH:$HOME/tools/gcc-arm-10.3-2021.07-x86_64-arm-none-linux-gnueabihf/bin
+export ARCH=arm CROSS_COMPILE=arm-none-linux-gnueabihf- KBUILD_OUTPUT=out
+make vexpress_defconfig
+
+
+docker run -d \
+    --restart always \
+    --name opengrok \
+    -p 80:8080/tcp \
+    -v /home/richard/opengrok_home/src/:/opengrok/src/ \
+    -v /home/richard/opengrok_home/etc/:/opengrok/etc/ \
+    -v /home/richard/opengrok_home/data/:/opengrok/data/ \
+    opengrok/docker:master
+
+
+
+
+busybox/rootfs
+– defconfig：缺省配置，也就是默认配置选项
+– allyesconfi：全选配置，即选中 busybox 的所有功能
+– allnoconfig：最小配置
+cd   busybox-1.35.0
+make defconfig
+make
+make install CONFIG_PREFIX=../rootfs
+
+# 首先需要做得就像创建必备目录 sys proc dev 这些是作为 kernel 内部虚拟文件系统的挂载点使用的
+# 其次是创建 /ect 和 /root , 分别是配置目录和 root 用户的工作目录
+
+mkdir $LFS/rootfs/sys $LFS/rootfs/proc $LFS/rootfs/dev  -p
+mkdir $LFS/rootfs/etc/init.d $LFS/rootfs/root -p
+mkdir $LFS/rootfs/lib -p
+
+# 创建 root 用户, 默认无密码登录, 可在登录后设置
+echo "root::0:0:root:/root:/bin/sh" > $LFS/rootfs/etc/passwd
+
+# 让系统执行 rcS 下的脚本进行初始化工作
+echo "::sysinit:/etc/init.d/rcS" > $LFS/rootfs/etc/inittab
+
+# 设置可登录系统的终端
+echo "ttyAMA0::respawn:/sbin/getty -L 0 ttyAMA0 vt100" >> $LFS/rootfs/etc/inittab
+
+# 让 rcS 脚本挂载 kernel 虚拟文件系统, 
+echo "mount -t sysfs sys /sys" > $LFS/rootfs/etc/init.d/rcS
+echo "mount -t proc proc /proc" >> $LFS/rootfs/etc/init.d/rcS
+echo "mount -t devtmpfs udev /dev" >> $LFS/rootfs/etc/init.d/rcS
+
+# [可选] ssh 登录时需要挂载 /dev/pts 文件系统
+mkdir $LFS/rootfs/dev/pts
+echo "mount -t devpts devpts /dev/pts" >> $LFS/rootfs/etc/init.d/rcS
+
+chmod 755 $LFS/rootfs/etc/init.d/rcS
+
+mkdir rootfs/lib
+cp -a gcc-arm-10.3-2021.07-x86_64-arm-none-linux-gnueabihf/arm-none-linux-gnueabihf/lib/*  rootfs/lib
+cp -a gcc-arm-10.3-2021.07-x86_64-arm-none-linux-gnueabihf/arm-none-linux-gnueabihf/libc/  rootfs/
+
+
+
+/cygdrive/c/qemu/qemu-system-arm -M vexpress-a9 -m 1G -nographic -kernel /cygdrive/z/develop/linux-4.19.259/out/arch/arm/boot/zImage -dtb /cygdrive/z/develop/linux-4.19.259/out/arch/arm/boot/dts/vexpress-v2p-ca9.dtb -initrd /cygdrive/z/develop/rootfs.cpio.gz -append "rdinit=/linuxrc console=ttyAMA0"
+
+
+
+//内存根文件系统(initramfs)
+把内存直接当作根文件系统来使用
+cd ../rootfs
+find .|cpio -o --format=newc > ../rootfs.cpio
+cd ..
+gzip -c rootfs.cpio > rootfs.cpio.gz
+
+/cygdrive/c/qemu/qemu-system-arm                                      \
+     -M vexpress-a9                                  \
+     -m 512M                                         \
+     -nographic                                      \
+     -kernel zImage                                  \
+     -dtb vexpress-v2p-ca9.dtb                       \
+     -initrd rootfs.cpio.gz                          \
+     -append "rdinit=/linuxrc console=ttyAMA0"
+
+C:\qemu\qemu-system-arm -M vexpress-a9 -m 1G -nographic -kernel Z:\develop\linux-4.19.259\out\arch\arm\boot\zImage -dtb Z:\develop\linux-4.19.259\out\arch\arm\boot\dts\vexpress-v2p-ca9.dtb -initrd Z:\develop\rootfs.cpio.gz -serial stdio -append "rdinit=/linuxrc console=ttyAMA0"
+
+
+
+
+//内存根文件系统(initrd)
+把内存当作块设备使用，在块设备上构建一个根文件系统
+新版本 kernel 默认不再提供内存块设备支持， 需要手动打开 CONFIG_BLK_DEV_RAM=y
+dd if=/dev/zero of=rootfs.img bs=1024 count=4096       # 创建 4096k 虚拟磁盘
+mkfs.ext2 rootfs.img                                   # 格式化成 ext2 格式文件系统
+mount -o loop rootfs.img /mnt                          # 将镜像文件和块设备关联并挂载设备到 /mnt
+cp hello /mnt                                          # 将 hello 程序拷贝到根目录
+umount /mnt                                            # 卸载磁盘
+
+qemu-system-arm                                      \
+     -M vexpress-a9                                  \
+     -m 512M                                         \
+     -nographic                                      \
+     -kernel zImage                                  \
+     -dtb vexpress-v2p-ca9.dtb                       \
+     -initrd rootfs.img                          \
+     -append "root=/dev/ram0 init=/linuxrc console=ttyAMA0"
+
+
+
+//非易失性存储设备作为根文件系统
+将非易失性存储设备视为块设备，在块设备上构建一个根文件系统
+dd if=/dev/zero of=rootfs.img bs=1G count=2
+mkfs.ext4 rootfs.img
+sudo mount -o loop rootfs.img /mnt
+sudo cp rootfs/* /mnt -r
+sudo umount /mnt
+
+qemu-system-arm                                     \
+    -M vexpress-a9                                  \
+    -m 512M                                         \
+    -kernel zImage                         \
+    -nographic                                      \
+    -dtb vexpress-v2p-ca9.dtb              \
+    -sd rootfs.img                         \
+    -append "root=/dev/mmcblk0 rw rootfstype=ext4 init=/linuxrc console=ttyAMA0,115200"
+	
+C:\Users\haijie.gong\Documents\MobaXterm\home\develop
+cp C:\Users\haijie.gong\Documents\MobaXterm\home\
+
+
+
+
+
+系统初始化(init)
+
+[KNL]
+init=文件全路径
+指定内核挂载根文件系统后运行的第一个用户空间程序的绝对路径。默认为"/sbin/init"。
+
+[KNL]
+rdinit=全路径
+设置从initramfs中运行的第一个用户空间程序的绝对路径，默认为"/init"。
+[注意]一旦使用了initramfs并且成功的运行了其中的"/init"，所有"init="以及与根文件系统相关的选项(例如"root=" "nfsroot=")对内核而言都将失效。
+initramfs中的脚本必须自己分析各个内核引导选项(/proc/cmdline)并完成根文件系统的挂载与切换，当然也包括启动真正的"init"进程。
+
+[KNL]
+S
+以单用户模式运行"init"。注意，这不是一个真正的内核选项，只是给initramfs中的脚本用的。所以并不通用。
+
+
+
+https://109.104.115.199:8080/svn/FW_Part/FWPart2_SH/DOC/RU_feature/%e7%bc%96%e7%a8%8b%e8%a7%84%e8%8c%83/
+
+
+https://www.wenjiangs.com/doc/yb8e2ci7
+https://jasonblog.github.io/note/arm_emulation/compile_linux_kernel_32_for_arm_and_emulate_with_qemu.html
+https://www.jianshu.com/p/bf96ff253f0f
+https://www.jianshu.com/p/f7d5b6ad0710
+https://www.jianshu.com/p/b4bae215e278
+
+
+//NOVUS_MAIN/Fossil/Mazu/ZYNQ_COMM_LTE_NR/RU_APP/...    //haijie.gong_zynq/RU_APP/...
+
+http://109.104.115.199:8080/svn/ TMUS_600M700M_Dualband_LTE_4T4R_240W_RDJ011910-00CS/Release/%E4%B8%B4%E6%97%B6%E7%89%88%E6%9C%AC/secure%20boot%E7%89%88%E6%9C%AC/zynq7000_secureboot
+
+
+CompileDir=/home/shanghai/yejia.wei/ver_make_zynq/ZYNQ_COMM_rf2223-05a
+PRODUCT_NAME = rf2223-05a
+ImgName      = secure_rf2223-05a
+WorkPath     = /home/shanghai/yejia.wei/ver_make_zynq
+RlsPath      = /home/shanghai/yejia.wei/ver_make_zynq/xzp1_img/mkImg_v3.01/secure_rf2223-05a/RELEASE
+FsblVer      = 201808
+VERSION=     $(cat /home/shanghai/yejia.wei/ver_make_zynq/ZYNQ_COMM_rf2223-05a/FSBL_VERSION)
+
+
+WDIR=$(pwd)                                                 /home/shanghai/yejia.wei/ver_make_zynq/xzp1_sw
+XZP1_WDIR_IMGH        =  "$WDIR/../xzp1_img/mkImg_v3.01"    /home/shanghai/yejia.wei/ver_make_zynq/xzp1_img/mkImg_v3.01 
+XZP1_WDIR_IMGH_FSBL   =  XZP1_WDIR_IMGH
+
+
+cp $CompileDir/OutPut/fsbl.elf                             $XZP1_WDIR_IMGH_FSBL/P.$PRODUCT/FSBL/backup/$PRODUCT.elf
+cp $CompileDir/OutPut/fsbl_bsp_xilskey_efuse_example_1.elf $XZP1_WDIR_IMGH_FSBL/P.$PRODUCT/FSBL/backup/
+cp $CompileDir/OutPut/psk0.pem                             $XZP1_WDIR_IMGH_FSBL/P.$PRODUCT/FSBL/backup/
+cp $CompileDir/OutPut/ssk0.pem                             $XZP1_WDIR_IMGH_FSBL/P.$PRODUCT/FSBL/backup/
+
+
+
+ progname=$(basename $0)       build_xzp1.sh
+./build_xzp1.sh fsbl   [release]
+
+
+
+PRODUCT=$(echo $1 |tr A-Z a-z)     fsbl
+F_VER=$2                           release
+
+
+
+
+C:\Users\haijie.gong\project\vivado_project\led\led.runs\impl_1\led_twinkle.bit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+https://www.jianshu.com/p/3c5212b47bec
+https://blog.csdn.net/zhaoxinfan/article/details/54958641
+https://bbs.pediy.com/thread-260399.htm
+https://zhuanlan.zhihu.com/p/566867415
+
+
+
+1. power_on and bootROM find JTAG boot mode
+2. bootROM download some infomation from xilinx SDK IDE and init DDR3
+3. bootROM download  hello_world.elf  to DDR3
+4. bootROM jump to hello_world.elf ENTRY(_vector_table) defined in bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/asm_vector.c
+5. _vector_table jump to _boot   , _boot  is defined in  bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/boot.S
+6. _boot         jump to _start  , _start is defined in  bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/xil-crt0.S
+7. _start        jump to main    , main   is defined in  hello_world/src/main.c
+
+
+
+
+BOOT.bin  and  output.bif  are in sd card FAT filesystem
+output.bif defines partition type and filename in BOOT.bin
+BOOT.bin contains fsbl.elf(partition type is bootloader)   xxx.bit(partition type is datafile)   hello_world.elf(partition type is datafile)
+
+1. power_on and bootROM find SD boot mode
+2. bootROM has FAT filesystem diver, copy fsbl.elf to iRAM
+4. bootROM check fsbl.elf
+5. bootROM jump to fsbl.elf ENTRY(_vector_table) defined in bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/asm_vector.c
+6. _vector_table jump to _boot   , _boot  is defined in  bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/boot.S
+7. _boot         jump to _start  , _start is defined in  bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/xil-crt0.S
+8. _start        jump to main   defined in fsbl/src/main.c
+9. fsbl main and some sub function which called by main
+   init DDR3
+   init PL by system_wrapper.bit, 
+   find now we are in sd boot mode, 
+   copy  hello_world.elf to DDR3
+   jump to hello_world.elf ENTRY(_vector_table) defined in bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/asm_vector.c
+10. _vector_table jump to _boot   , _boot  is defined in  bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/boot.S
+11. _boot         jump to _start  , _start is defined in  bsp/ps7_cortexa9_0/libsrc/standalone_v5_2/src/xil-crt0.S
+12. _start        jump to main    , main   is defined in  hello_world/src/main.c
