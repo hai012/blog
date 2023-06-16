@@ -56,7 +56,7 @@ static void test_for_each()
 6.list_for_each_rcu  RCU版本的list_for_each
 
 
-list_for_each
+list_for_each(pos, head) 
 list_for_each_continue
 list_for_each_prev
 list_for_each_prev_safe
@@ -81,6 +81,8 @@ list_for_each_entry_safe_reverse
 
 entry后缀
 版本传入的pos的类型是struct node_t *，相当于list_for_each + container_of/list_entry的版本默认遍历整个链表.
+list_for_each_entry(pos, head, member)，其中member是struct node_t 中内嵌struct list_head类型的成员名即entry
+
 
 continue后缀
 从当前pos节点的下一个节点开始遍历

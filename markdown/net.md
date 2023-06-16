@@ -3850,29 +3850,96 @@ poll函数记录下指向接收数据的旧的Buffer Address，然后开辟一�
 
 ### 中断上半部
 
-对于NAPI，中断上半部不需要构建sk_buff，首先保存先前的中断状态并禁止当前单个处理器的所有硬件中断，接着调用\_\_\_\_napi_schedule把struct napi_struct结构体放入当前CPU私有数据链表中，然后调用\_\_raise_softirq_irqoff通知当前CPU的ksoftirq线程可以处理软中断了，通知完成后(不需要等ksoftirq线程处理完成)一路返回并恢复先前的中断状态。
+
+
+```
+irqreturn_t irq_handler_rx(int irq, void *data)
+{
+    struct channel_data * channel = (struct channel_data *)data;
+    uint32_t flag = readl_relaxed(&channel->reg_base_channel->rx_irq_flag);
+
+    if(likely(flag & IRQF_RX_RECV)) {
+        if (likely(napi_schedule_prep(&channel->napi_rx))) {
+            //uini32_t mask = readl_relaxed(&channel->reg_base_channel->tx_irq_mask);
+            //mask &= ~IRQF_RX_RECV;
+            writel_relaxed(0, &channel->reg_base_channel->rx_irq_mask);//mask IRQF_RX_RECV;
+            __napi_schedule(&channel->napi_rx);
+        }
+    }
+    /*if(flag & IRQF_RX_FULL) {
+    }
+    if(flag & IRQF_RX_ERR) {
+    }
+    //printk("MYNET:rxirq:w:0x%04x\n",flag);
+    BUG_ON(flag & IRQF_RX_ERR);*/
+
+    //clear all irq flag
+    writel(0, &channel->reg_base_channel->rx_irq_flag);
+    return IRQ_HANDLED;
+}
+```
 
 
 
-![image-20220816100914722](net.assets/image-20220816100914722.png)
+可以在中断上半部频繁调用napi_schedule，即使该napi已经处于NAPIF_STATE_SCHED状态
 
 
 
-![image-20220816100707075](net.assets/image-20220816100707075.png)
+* napi_schedule
+
+![image-20230616182120190](net.assets/image-20230616182120190.png)
 
 
+
+
+
+
+* napi_schedule_prep
+
+napi_schedule_prep判断传入的struct napi_struct是否已经处于schedule状态
+
+如果已经处于schedule状态说明此struct napi_struct有NAPIF_STATE_SCHED标志(代表这软中断准备/正在进行poll处理)，则设置STATE_MISSED 标记，待后续在\_\_napi\_poll或网卡驱动的poll函数中调用napi_complete_done函数时，在napi_complete_done函数里面判断是否有STATE_MISSED 标记，如果有则重新调用__napi_schedule并返回false。
+
+![image-20230616165746076](net.assets/image-20230616165746076.png)
+
+
+
+* mask 网卡接收事件，使其不能触发 irq
+
+  在中断上半部调用__napi_schedule之前需要屏蔽mask 网卡接收事件，使其不能触发 irq，网卡驱动poll函数里面调用napi_complete_done如果返回的是true就再次把网卡接收事件unmask，使其能能触发 irq。
+
+  
+
+这一步的关键是避免频繁触发中断，然后在中断上半部尝试去把napi放入CPU私有数据后触发软中断。因为
+
+
+
+注意在调用__napi_schedule之前需要把网卡接收中断mask掉，待后续napi_complete_done返回true后再把网卡接收中断unmask，否则在\_\_\_\_napi_schedule把struct napi_struct放入当前CPU的私有数据链表时就可能会BUG_ON报错，因为此时该struct napi_struct已经被napi_complete_done又重新放入了CPU的私有数据链表。CPU的私有数据链表中的struct napi_struct必须是唯一的，即只能是多个处于不同内存地址的struct napi_struct类型的变量。
+
+
+
+
+
+
+
+
+* __napi_schedule
+
+首先保存先前的中断状态并禁止当前单个处理器的所有硬件中断，接着调用\_\_\_\_napi_schedule把struct napi_struct结构体放入当前CPU私有数据链表中，然后调用\_\_raise_softirq_irqoff通知当前CPU的ksoftirq线程可以处理软中断了，通知完成后(不需要等ksoftirq线程处理完成)一路返回并恢复先前的中断状态。
 
 local_irq_save(flags);//保存先前中断状态，并禁止当前单个处理器的所有中断
 
 local_irq_restore(flags);//恢复当前单个处理器的中断状态
 
-
-
-![image-20220816100618864](net.assets/image-20220816100618864.png)
+![image-20230616181100715](net.assets/image-20230616181100715.png)
 
 
 
-![image-20220816103656815](net.assets/image-20220816103656815.png)
+![image-20230616181134559](net.assets/image-20230616181134559.png)
+
+
+
+![image-20230616182228592](net.assets/image-20230616182228592.png)
 
 
 
@@ -3894,166 +3961,321 @@ static int __init net_dev_init(void)
 
 
 
+![image-20230616131020721](net.assets/image-20230616131020721.png)
+
+sd->poll_list里面的struct napi_struct没有重复的，是内存位置不同的struct napi_struct类型的结构体。
+
+net_rx_action里面会循环判断sd->poll_list是否为空，如果不为空就从sd->poll_list里面第一个节点读出struct napi_struct(此时并未删除该节点)，然后去调用napi_poll函数。napi_poll返回的是调用一次网卡驱动注册的poll函数处理了多少个skb。
+
+net_rx_action里面的初始budget值为300，代表这一次napi_schedule唤醒ksoftirqd线程执行net_rx_action函数的过程中最多处理300个skb。如果300个额度用光但sd->poll_list还是不为空(说明硬件还有数据需要处理)，则在line 7186继续注册待后续再触发一次软中断并回调net_rx_action。注意line 7155 和line 7180，在poll函数执行期间当前CPU的开启了中断。
+
+![image-20230616131108010](net.assets/image-20230616131108010.png)
+
+###  napi_poll
 
 
-![image-20230410163342218](net.assets/image-20230410163342218.png)
 
+![image-20230616131944668](net.assets/image-20230616131944668.png)
 
+```
+napi_poll里面在line 7076会把struct napi_struct从sd->poll_list链表中删掉，然后在line 7080调用__napi_poll去处理这个被删掉的struct napi_struct,如果__napi_poll里面把do_repoll改成了true,则在line 7076又会把删掉的这个struct napi_struct重新放入sd->poll_list链表，待napi_poll函数退出后在net_rx_action函数里面判断一下是否超时或达到netdev_budget(默认是300个skb)，如果都不满足则继续for循环，由于sd->poll_list链表不为空，又继续调用napi_poll函数去处理。
 
-
-
-
-
-
-
-- SEC  秒
-- PER  每
-- NSEC 纳秒
-- MSEC 毫秒
-- USEC 微秒
-
-```cpp
-#define NSEC_PER_SEC 1000000000ull     多少纳秒 = 1秒            1秒 = 10亿纳秒              
-#define NSEC_PER_MSEC 1000000ull       多少纳秒 = 1毫秒          1毫秒 = 100万纳秒
-#define USEC_PER_SEC 1000000ull        多少微秒 = 1秒            1秒 = 100万微秒   
-#define NSEC_PER_USEC 1000ull          多少纳秒 = 1微秒           1微秒 = 1000 纳秒
+后面分析__napi_poll可知当调一次网卡驱动注册的poll函数后，只有返回的work等于weight时__napi_poll函数里面才会把do_repoll改成true, work是调用一次网卡驱动poll函数后实际处理了多少个skb
 ```
 
 
 
-kernel-4.19/net/core/dev.c
+###  __napi_poll
 
-```c
-3936  int netdev_budget __read_mostly = 300; //一次接收软中断最多处理300个数据包
-3937  /* Must be at least 2 jiffes to guarantee 1 jiffy timeout */   // 一次接收软中断最多持续 200万个 1/HZ 时间
-3938  unsigned int __read_mostly netdev_budget_usecs = 2 * USEC_PER_SEC / HZ;
 
-......
- 
-6272  static int napi_poll(struct napi_struct *n, struct list_head *repoll)
-6273  {
-6274  	void *have;
-6275  	int work, weight;
-6276  
-6277  	list_del_init(&n->poll_list);
-6278  
-6279  	have = netpoll_poll_lock(n);
-6280  
-6281  	weight = n->weight;//weight在netif_napi_add初始化napi_struct时指定，即一次最大能处理多少个数据包
-6282  
-6283  	/* This NAPI_STATE_SCHED test is for avoiding a race
-6284  	 * with netpoll's poll_napi().  Only the entity which
-6285  	 * obtains the lock and sees NAPI_STATE_SCHED set will
-6286  	 * actually make the ->poll() call.  Therefore we avoid
-6287  	 * accidentally calling ->poll() when NAPI is not scheduled.
-6288  	 */
-6289  	work = 0;
-6290  	if (test_bit(NAPI_STATE_SCHED, &n->state)) {
-6291  		struct softnet_data *sd = this_cpu_ptr(&softnet_data);
-6292  
-6293  		sd->current_napi = n;
-6294  		work = n->poll(n, weight);//回调struct napi_struct中的poll函数指针来进行处理，poll返回处理了多少个数据包
-6295  		trace_napi_poll(n, work, weight);
-6296  	}
-6297  
-6298  	WARN_ON_ONCE(work > weight);
-6299  
-6300  	if (likely(work < weight))       
-6301  		goto out_unlock;//收包数量小于配额，全部读完了就退出
-6302    //接下来的代码处理超过weight后还需要继续poll的情况
-6303  	/* Drivers must not modify the NAPI state if they
-6304  	 * consume the entire weight.  In such cases this code
-6305  	 * still "owns" the NAPI instance and therefore can
-6306  	 * move the instance around on the list at-will.
-6307  	 */
-6308  	if (unlikely(napi_disable_pending(n))) {
-6309  		napi_complete(n);
-6310  		goto out_unlock;
-6311  	}
-6312  
-6313  	if (n->gro_bitmask) {
-6314  		/* flush too old packets
-6315  		 * If HZ < 1000, flush all packets.
-6316  		 */
-6317  		napi_gro_flush(n, HZ >= 1000);
-6318  	}
-6319  
-6320  	/* Some drivers may have called napi_schedule
-6321  	 * prior to exhausting their budget.
-6322  	 */
-6323  	if (unlikely(!list_empty(&n->poll_list))) {
-6324  		pr_warn_once("%s: Budget exhausted after napi rescheduled\n",
-6325  			     n->dev ? n->dev->name : "backlog");
-6326  		goto out_unlock;
-6327  	}
-6328  
-6329  	list_add_tail(&n->poll_list, repoll);      //将超过weight后还需要继续poll的napi_struct挂到 repoll 链表上
-6330  
-6331  out_unlock:
-6332  	netpoll_poll_unlock(have);
-6333  
-6334  	return work;
-6335  }
-6336  //open_softirq(NET_RX_SOFTIRQ, net_rx_action)注册的软中断接收处理函数
-6337  static __latent_entropy void net_rx_action(struct softirq_action *h)
-6338  {
-6339  	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
-6340  	unsigned long time_limit = jiffies +
-6341  		usecs_to_jiffies(netdev_budget_usecs);  //记录超时时候的 jiffies
-6342  	int budget = netdev_budget;//记录本次软中断还能处理多少个包
-6343  	LIST_HEAD(list);//创建并初始化一个list链表头
-6344  	LIST_HEAD(repoll);
-6345  
-6346  	local_irq_disable();
-6347  	list_splice_init(&sd->poll_list, &list);//将当前cpu的待处理的napi_struct转移到list
-6348  	local_irq_enable();
-6349  
-6350  	for (;;) {//循环处理 list 中的每个节点，每个节点对应一次硬件接收中断，一次软中断可以会处理多次硬中断请求
-6351  		struct napi_struct *n;
-6352  
-6353  		if (list_empty(&list)) {
-6354  			if (!sd_has_rps_ipi_waiting(sd) && list_empty(&repoll))
-6355  				goto out;
-6356  			break;
-6357  		}
-6358        //从 list 中取出一个节点，节点的类型是struct napi_struct，在链表中的container_of是poll_list
-6359  		n = list_first_entry(&list, struct napi_struct, poll_list);    //采用的是fifo调度算法
-6360  		budget -= napi_poll(n, &repoll);//使用napi_poll处理
-6361  
-6362  		/* If softirq window is exhausted then punt.
-6363  		 * Allow this to run for 2 jiffies since which will allow
-6364  		 * an average latency of 1.5/HZ.
-6365  		 */
-6366  		if (unlikely(budget <= 0 ||
-6367  			     time_after_eq(jiffies, time_limit))) {//检查是否超时
-6368  			sd->time_squeeze++;
-6369  			break;
-6370  		}
-6371  	}//至此本次软中断处理完了一轮硬件接收中断请
-6372    //如果repoll不为空即仍需继续处理，将repoll中的napi_struct放入当前CPU的私有链表，并触发下一次软中断进行处理
-6373  	local_irq_disable();
-6374    
-6375  	list_splice_tail_init(&sd->poll_list, &list);
-6376  	list_splice_tail(&repoll, &list);
-6377  	list_splice(&list, &sd->poll_list);
-6378  	if (!list_empty(&sd->poll_list))
-6379  		__raise_softirq_irqoff(NET_RX_SOFTIRQ);
-6380  
-6381  	net_rps_action_and_irq_enable(sd);
-6382  out:
-6383  	__kfree_skb_flush();
-6384  }
+
+```
+6999  static int __napi_poll(struct napi_struct *n, bool *repoll)
+7000  {
+7001  	int work, weight;
+7002  
+7003  	weight = n->weight;//netif_napi_add的时候把weight默认设置成了64
+7004  
+7005  	/* This NAPI_STATE_SCHED test is for avoiding a race
+7006  	 * with netpoll's poll_napi().  Only the entity which
+7007  	 * obtains the lock and sees NAPI_STATE_SCHED set will
+7008  	 * actually make the ->poll() call.  Therefore we avoid
+7009  	 * accidentally calling ->poll() when NAPI is not scheduled.
+7010  	 */
+7011  	work = 0;
+7012  	if (test_bit(NAPI_STATE_SCHED, &n->state)) {
+7013  		work = n->poll(n, weight);//回调网卡驱动往napi里注册的poll函数
+7014  		trace_napi_poll(n, work, weight);
+7015  	}
+7016  
+7017  	if (unlikely(work > weight))//如果实际处理的skb个数比weight大，则报错
+7018  		pr_err_once("NAPI poll function %pS returned %d, exceeding its budget of %d.\n",
+7019  			    n->poll, work, weight);
+7020  
+7021  	if (likely(work < weight))//如果实际处理的skb个数比weight小，说明weight的额度没用完，但硬件中已经没有数据要处理了
+7022  		return work;
+7023    //以下是work == weight的情况，此时调用一次网卡驱动poll后weight的额度用完了，但硬件中还有数据要处理
+7024  	/* Drivers must not modify the NAPI state if they
+7025  	 * consume the entire weight.  In such cases this code
+7026  	 * still "owns" the NAPI instance and therefore can
+7027  	 * move the instance around on the list at-will.
+7028  	 */
+7029  	if (unlikely(napi_disable_pending(n))) {
+7030  		napi_complete(n);
+7031  		return work;
+7032  	}
+7033  
+7034  	/* The NAPI context has more processing work, but busy-polling
+7035  	 * is preferred. Exit early.
+7036  	 */
+7037  	if (napi_prefer_busy_poll(n)) {
+7038  		if (napi_complete_done(n, work)) {//可能会把数据推入网络协议栈
+7039  			/* If timeout is not set, we need to make sure
+7040  			 * that the NAPI is re-scheduled.
+7041  			 */
+7042  			napi_schedule(n);
+7043  		}
+7044  		return work;
+7045  	}
+7046  
+7047  	if (n->gro_bitmask) {
+7048  		/* flush too old packets
+7049  		 * If HZ < 1000, flush all packets.
+7050  		 */
+7051  		napi_gro_flush(n, HZ >= 1000);//可能会把数据推入网络协议栈
+7052  	}
+7053  
+7054  	gro_normal_list(n);//可能会把数据推入网络协议栈
+7055  
+7056  	/* Some drivers may have called napi_schedule
+7057  	 * prior to exhausting their budget.
+7058  	 */
+7059  	if (unlikely(!list_empty(&n->poll_list))) {
+7060  		pr_warn_once("%s: Budget exhausted after napi rescheduled\n",
+7061  			     n->dev ? n->dev->name : "backlog");
+7062  		return work;
+7063  	}
+7064  
+7065  	*repoll = true;//把repoll改成true，待__napi_poll返回到napi_poll后把当前的struct napi_struct再次放入链表
+7066  
+7067  	return work;
+7068  }
+```
+
+
+
+### mynet_poll_rx
+
+在网卡驱动的poll函数里如果done==weight，则后续不能再调用 napi_complete_done
+
+```
+static int mynet_poll_rx(struct napi_struct *napi, int budget)
+{
+    struct channel_data * channel = container_of(napi, struct channel_data, napi_rx);
+    int done=0, bytes = 0;
+    char *linear_buffer_replace;
+    char *linear_buffer_recv;
+    dma_addr_t dma_addr;
+    struct sk_buff * skb;
+    uint32_t recv_bytes;
+    
+    while(budget>done)
+    {
+            if(is_node_belong_to_hw(channel->rx_ring)) {
+                //now, there is no linear_buffer to receive
+                //pr_err("MYNET:%d:RX:now, there is no linear_buffer to receive\n",channel->num);
+                break;
+            }
+
+            //save received page
+            dma_unmap_single(&pdev->dev,
+                            channel->rx_ring->virtual_addr->base,
+                            MAX_RECV_LEN,
+                            DMA_FROM_DEVICE);
+            linear_buffer_recv = channel->rx_ring->linear_buffer;
+            recv_bytes = channel->rx_ring->virtual_addr->len;
+
+
+            //replace
+            //char * linear_buffer_replace = napi_alloc_frag(MAX_RX_SKB_LINEAR_BUFF_LEN);
+            linear_buffer_replace = page_frag_alloc_align(&channel->page_cache, MAX_RX_SKB_LINEAR_BUFF_LEN, GFP_KERNEL|GFP_DMA, 0);
+            if(unlikely(!linear_buffer_replace)) {
+                pr_err("MYNET:%d:RX:napi_alloc_frag failed\n",channel->num);
+                break;
+            }
+            dma_addr = dma_map_single(&pdev->dev,
+                                      linear_buffer_replace + ETH_HEADER_OFFSET_IN_LINEAR_BUFF,
+                                      MAX_RECV_LEN,
+                                      DMA_TO_DEVICE);
+            if (unlikely(dma_mapping_error(&pdev->dev, dma_addr))) {
+                pr_err("MYNET:%d:RX:dma_map_single  failed\n",channel->num);
+                skb_free_frag(linear_buffer_replace);  //page_frag_free
+                break;
+            }
+            channel->rx_ring->linear_buffer = linear_buffer_replace;
+            writel_relaxed(dma_addr,                        &channel->rx_ring->virtual_addr->base);
+            writel_relaxed(MAX_RECV_LEN,                    &channel->rx_ring->virtual_addr->len);
+            writel(NODE_F_TRANSFER|NODE_F_BELONG,   &channel->rx_ring->virtual_addr->flag);
+            channel->rx_ring = channel->rx_ring->next;
+            //start rx anyway no mater hw rx thread is run
+            writel(1,  &channel->reg_base_channel->rx_ctl_status);
+
+            //recv
+            skb = napi_build_skb(linear_buffer_recv, MAX_RX_SKB_LINEAR_BUFF_LEN);
+            if (unlikely(!skb)) {
+                pr_err("MYNET:%d:RX:build_skb fail\n",channel->num);
+                skb_free_frag(linear_buffer_recv);
+                //netdev->stats.rx_dropped++;
+                break;
+            }
+            skb_reserve(skb, ETH_HEADER_OFFSET_IN_LINEAR_BUFF);
+            skb_record_rx_queue(skb,channel->queue_index);
+            skb->dev = netdev;
+            skb_put(skb,recv_bytes);
+            //skb_mark_for_recycle(skb); see page_pool
+            
+            /*接收过程中，ip_summed字段包含了网络设备硬件告诉L4软件当前校验和的状态，各值含义如下：
+CHECKSUM_NONE：硬件没有提供校验和，可能是硬件不支持，也可能是硬件校验出错但是并未丢弃数据包，这时L4软件需要自己进行校验和计算；
+CHECKSUM_UNNECESSARY：硬件已经进行了完整的校验，软件无需再进行检查。这时L4软件会跳过校验和检查；
+CHECKSUM_COMPLETE：硬件已经计算了L4报头和其payload部分的校验和，并将计算结果保存在了skb->csum中，L4软件只需要再计算伪报头即可；
+发送过程中，ip_summed字段记录了L4软件想要告诉网络设备硬件关于当前数据包的校验和状态信心。各值含义如下：
+CHECKSUM_NONE：L4软件已经对数据包进行了完整的校验，或者该数据包不需要校验。总之这种情况下网络设备硬件无需做任何校验和计算；
+CHECKSUM_PARTIAL：L4软件计算了伪报头的校验和，并且将值保存在了数据报的L4层首部的check字段中，网络设备硬件需要计算其余部分的校验和（报文首部+数据部分）。硬件需要计算的报文范围是从skb->csum_start到报文最后一个字节，计算结果需要填写到（skb->csum_start + skb->csum_offset）处。
+*/
+            skb->ip_summed = CHECKSUM_UNNECESSARY;/* don't check it */
+            skb->protocol = eth_type_trans(skb, netdev);
+
+            bytes += skb->len;
+            ++done;
+
+            napi_gro_receive(napi,skb);
+
+    }
+
+    channel->rx_packets += done;
+    channel->rx_bytes += bytes;
+
+    if(done==budget) {//此时硬件里面还有数据需要继续触发poll
+        return budget;//直接返回，返回后交给__napi_poll函数里面的line 7024 ~ line 7098去处理
+    }在网卡驱动的poll函数里如果done==weight，则后续不能再调用 napi_complete_done
+
+	//此时done  <    napi->weight，硬件里面没有数据了
+    if(napi_complete_done(napi,done)) {
+    	//如果napi_complete_done返回true说明是时候开启网卡接收中断，待中断发生后在上半部继续napi_schedule触发poll
+        writel(IRQF_RX_RECV,  &channel->reg_base_channel->rx_irq_mask);//umask IRQF_RX_RECV
+    }
+    return done;
+}
+```
+
+
+
+	napi_complete_done返回true说明需要开启
+	里面会判断NAPIF_STATE_MISSED标志
+	如果NAPIF_STATE_MISSED标志说明在
+
+
+```
+6555  bool napi_complete_done(struct napi_struct *n, int work_done)
+6556  {
+6557  	unsigned long flags, val, new, timeout = 0;
+6558  	bool ret = true;
+6559  
+6560  	/*
+6561  	 * 1) Don't let napi dequeue from the cpu poll list
+6562  	 *    just in case its running on a different cpu.
+6563  	 * 2) If we are busy polling, do nothing here, we have
+6564  	 *    the guarantee we will be called later.
+6565  	 */
+6566  	if (unlikely(n->state & (NAPIF_STATE_NPSVC |
+6567  				 NAPIF_STATE_IN_BUSY_POLL)))
+6568  		return false;
+6569  
+6570  	if (work_done) {
+6571  		if (n->gro_bitmask)
+6572  			timeout = READ_ONCE(n->dev->gro_flush_timeout);
+6573  		n->defer_hard_irqs_count = READ_ONCE(n->dev->napi_defer_hard_irqs);
+6574  	}
+6575  	if (n->defer_hard_irqs_count > 0) {
+6576  		n->defer_hard_irqs_count--;
+6577  		timeout = READ_ONCE(n->dev->gro_flush_timeout);
+6578  		if (timeout)
+6579  			ret = false;
+6580  	}
+6581  	if (n->gro_bitmask) {
+6582  		/* When the NAPI instance uses a timeout and keeps postponing
+6583  		 * it, we need to bound somehow the time packets are kept in
+6584  		 * the GRO layer
+6585  		 */
+6586  		napi_gro_flush(n, !!timeout);
+6587  	}
+6588  
+6589  	gro_normal_list(n);
+6590  
+6591  	if (unlikely(!list_empty(&n->poll_list))) {
+6592  		/* If n->poll_list is not empty, we need to mask irqs */
+6593  		local_irq_save(flags);
+6594  		list_del_init(&n->poll_list);
+6595  		local_irq_restore(flags);
+6596  	}
+6597  
+6598  	do {
+6599  		val = READ_ONCE(n->state);
+6600  
+6601  		WARN_ON_ONCE(!(val & NAPIF_STATE_SCHED));
+6602  
+6603  		new = val & ~(NAPIF_STATE_MISSED | NAPIF_STATE_SCHED |
+6604  			      NAPIF_STATE_SCHED_THREADED |
+6605  			      NAPIF_STATE_PREFER_BUSY_POLL);
+6606  
+6607  		/* If STATE_MISSED was set, leave STATE_SCHED set,
+6608  		 * because we will call napi->poll() one more time.
+6609  		 * This C code was suggested by Alexander Duyck to help gcc.
+6610  		 */
+6611  		new |= (val & NAPIF_STATE_MISSED) / NAPIF_STATE_MISSED *
+6612  						    NAPIF_STATE_SCHED;
+6613  	} while (cmpxchg(&n->state, val, new) != val);
+6614  
+6615  	if (unlikely(val & NAPIF_STATE_MISSED)) {
+6616  		__napi_schedule(n);
+6617  		return false;
+6618  	}
+6619  
+6620  	if (timeout)
+6621  		hrtimer_start(&n->timer, ns_to_ktime(timeout),
+6622  			      HRTIMER_MODE_REL_PINNED);
+6623  	return ret;
+6624  }
+6625  EXPORT_SYMBOL(napi_complete_done);
 ```
 
 
 
 
 
-![image-20230404154537431](net.assets/image-20230404154537431.png)
 
 
 
-![image-20230404154914510](net.assets/image-20230404154914510.png)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 前面分析过调用\_\_\_\_napi_schedule唤醒net_rx_action软中断
 
