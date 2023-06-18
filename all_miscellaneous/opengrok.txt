@@ -153,6 +153,21 @@ opengrok-indexer \
     -W /opengrok/etc/configuration.xml -U http://localhost:8080
 
 
+apt-get remove docker-ce docker-ce-cli containerd.io
+apt-get install ca-certificates curl gnupg lsb-release
+curl -fsSL http://mirrors.ustc.edu.cn/docker-ce/linux/ubuntu/gpg | sudo apt-key add -
+add-apt-repository "deb [arch=amd64] http://mirrors.ustc.edu.cn/docker-ce/linux/ubuntu $(lsb_release -cs) stable"
+apt-get install docker-ce docker-ce-cli containerd.io
+usermod -aG docker $USER
+
+docker run -d \
+ --restart always \
+  --name opengrok \
+   -p 80:8080/tcp \
+    -v /home/ghj/opengrok_home/src/:/opengrok/src/ \
+     -v /home/ghj/opengrok_home/etc/:/opengrok/etc/ \
+     -v /home/ghj/opengrok_home/data/:/opengrok/data/ \
+     opengrok/docker:master
 
 
 

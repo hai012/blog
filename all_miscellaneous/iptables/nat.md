@@ -179,6 +179,42 @@ nameserver  119.29.29.29
 9.测试，通过ifconfig命令，查到是B机器的IP。
 
 
+删除filter表FORWARD链上的第一条规则
+iptables -t filter -D FORWARD 1
+```
 
+
+
+iptabes 首先是匹配各个链上的缺省规则，如果缺省是DROP，则后续即使在表的对应链上添加了规则去ACCEPT也不会生效。
+
+
+
+
+
+
+
+```
+host:
+ens33   192.168.200.128   可以访问外网
+tap0    192.168.0.1       内网IP
+
+guest:
+mynet0  192.168.0.33      内网IP
+
+
+
+
+
+host上面执行：
+启用snat修改源地址三选一，--to-source可以是一个IP范围，例如192.168.200.128-192.168.200.200
+iptables -t nat –A POSTROUTING –s 192.168.0.0/24 –j SNAT --to-source 192.168.200.128
+iptables -t nat -I POSTROUTING -s 192.168.0.0/24 -o ens33 -j MASQUERADE
+iptables -t nat -A POSTROUTING -s 192.168.0.33 -j SNAT --to 192.168.200.128
+FORWARD链上缺省是DROP，打开forward 链进行转发
+iptables -t filter -P FORWARD ACCEPT
+
+
+guest上面执行：
+route add default gw 192.168.0.1
 ```
 
