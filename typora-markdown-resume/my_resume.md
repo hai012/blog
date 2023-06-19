@@ -31,7 +31,7 @@
 
 ## 开源项目
 
-​        qemu可以模拟vexpress arm开发板，在qemu里面自己为这款开发板实现了一个虚拟网卡硬件，该虚拟网卡与host的tap设备连接来传输数据。从kernel.org下载一份源码构建内核镜像，使用busybox构建一个根文件系统，用qemu把整个系统跑起来后，接着为guest linux OS开发这个虚拟网卡硬件的网络设备驱动程序。这套虚拟网卡硬件及驱动支持如下特性：NAPI、multi queue、DMA ring buffer、 scatter I/O、GRO/GSO、IRQ affinity等。最后借助host NAT转发，在guest里面使用该虚拟网卡成功访问了互联网。交叉编译了iperf工具放进开发板进行了一番性能测试，开发板原有的虚拟网卡TCP极限性能性能大概80 Mbits/sec，自己实现的虚拟网卡TCP极限性能性能大概300  Mbits/sec。项目地址：http://e.coding.net/ghjiee/notes/vexpress.git
+​        qemu可以模拟vexpress arm开发板，在qemu里面自己为这款开发板实现了一个虚拟网卡硬件，该虚拟网卡与host的tap设备连接来传输数据。从kernel.org下载一份源码构建内核镜像，使用busybox构建一个根文件系统，用qemu把整个系统跑起来后，接着为guest linux OS开发这个虚拟网卡硬件的网络设备驱动程序。这套虚拟网卡硬件及驱动支持如下特性：NAPI、multi queue、DMA ring buffer、 scatter I/O、GRO/GSO、IRQ affinity等。最后借助host NAT转发，在guest里面使用该虚拟网卡成功访问了互联网。交叉编译了iperf工具放进开发板进行了一番性能测试，开发板原有的虚拟网卡TCP TX极限性能大概80 Mbits/sec，RX极限性能小于10 Mbits/sec且十分不稳定qemu会报错，  自己实现的虚拟网卡TCP TX/RX极限性能均超过300  Mbits/sec。项目地址：http://e.coding.net/ghjiee/notes/vexpress.git
 
 <div STYLE="page-break-after: always;"></div>
 
