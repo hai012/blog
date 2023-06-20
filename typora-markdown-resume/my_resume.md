@@ -1,13 +1,13 @@
 ## 个人信息
 
-- 龚海杰/男/1996/湖南/英语6级
+- 龚海杰/男/1996/27岁/湖南/英语6级
 - 手机：17877783755，邮箱：1575454530@qq.com
 - 技术笔记博客：   https://e.coding.net/ghjiee/notes/blog.git
 - 目前在职
 
 ## 求职意向
 
-- 期望职位：linux内核网络驱动开发工程师/WiFi开发工程师
+- 期望职位：linux内核开发工程师/WiFi开发工程师
 - 期望城市：无城市要求
 
 ## 教育经历
@@ -20,8 +20,8 @@
 
 ## 技能简介
 
-* 熟悉linux常用命令、系统编程、网络编程、根系统构建、bring up。
-* 从零开发过完整的linux网卡驱动。
+* 熟悉linux常用命令、系统编程、网络编程、根系统构建启动。
+* 从零开发过完整的linux网卡驱动，涉及设备树、中断子系统、linux驱动模型、网络子系统、DMA等。
 * 有mtk/rk/amlogic安卓平台、嵌入式arm linux、stm32、51单片机开发经验。
 * 熟悉linux内核配置/编译、安卓系统构建、安卓系统启动流程，写过Kconfig/Makefile/Android.mk/rc启动脚本。
 * 用过gdb、trace32、ASAN，ftrace，熟悉常用debug手段。
@@ -31,7 +31,7 @@
 
 ## 开源项目
 
-​        qemu可以模拟vexpress arm开发板，在qemu里面自己为这款开发板实现了一个虚拟网卡硬件，该虚拟网卡与host的tap设备连接来传输数据。从kernel.org下载一份源码构建内核镜像，使用busybox构建一个根文件系统，用qemu把整个系统跑起来后，接着为guest linux OS开发这个虚拟网卡硬件的网络设备驱动程序。这套虚拟网卡硬件及驱动支持如下特性：NAPI、multi queue、DMA ring buffer、 scatter I/O、GRO/GSO、IRQ affinity等。最后借助host NAT转发，在guest里面使用该虚拟网卡成功访问了互联网。交叉编译了iperf工具放进开发板进行了一番性能测试，开发板原有的虚拟网卡TCP TX极限性能大概80 Mbits/sec，RX极限性能小于10 Mbits/sec且十分不稳定qemu会报错，  自己实现的虚拟网卡TCP TX/RX极限性能均超过300  Mbits/sec。项目地址：http://e.coding.net/ghjiee/notes/vexpress.git
+​        qemu可以模拟vexpress arm开发板，在qemu里面自己为这款开发板实现了一个虚拟网卡硬件，该虚拟网卡与host的tap设备连接来传输数据。从kernel.org下载一份最新的稳定版源码构建内核镜像，使用busybox构建一个根文件系统，用qemu把整个系统跑起来后，接着为guest linux OS开发这个虚拟网卡硬件的网络设备驱动程序。这套虚拟网卡硬件及驱动支持如下特性：NAPI、multi queue、DMA ring buffer、 scatter I/O、GRO/GSO、IRQ affinity等。最后借助host NAT转发，在guest里面使用该虚拟网卡成功访问了互联网。交叉编译了iperf工具放进开发板进行了一番性能测试，开发板原有的虚拟网卡TCP TX极限性能大概80 Mbits/sec，RX极限性能小于10 Mbits/sec且十分不稳定qemu会报错，  自己实现的这套虚拟网卡硬件及linux网卡驱动在TCP TX/RX极限性能上均超过300  Mbits/sec。项目地址：http://e.coding.net/ghjiee/notes/vexpress.git
 
 <div STYLE="page-break-after: always;"></div>
 
