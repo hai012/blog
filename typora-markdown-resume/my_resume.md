@@ -2,8 +2,8 @@
 
 - 龚海杰/男/1996/27岁/湖南/英语6级
 - 手机：17877783755，邮箱：1575454530@qq.com
-- 技术笔记博客：   https://e.coding.net/ghjiee/notes/blog.git
-- 目前在职
+- 技术笔记博客：   http://e.coding.net/ghjiee/notes/blog.git
+- 目前在职可月内到岗
 
 ## 求职意向
 
@@ -20,9 +20,9 @@
 
 ## 技能简介
 
-* 熟悉linux常用命令、系统编程、网络编程、根系统构建启动。
+* 熟悉linux常用命令、系统编程、网络编程、根系统构建与启动。
 * 从零开发过完整的linux网卡驱动，涉及设备树、中断子系统、linux驱动模型、网络子系统、DMA等。
-* 有mtk/rk/amlogic安卓平台、嵌入式arm linux、stm32、51单片机开发经验。
+* 有mtk/rockchip/amlogic安卓平台、嵌入式arm linux、stm32、51单片机开发经验。
 * 熟悉linux内核配置/编译、安卓系统构建、安卓系统启动流程，写过Kconfig/Makefile/Android.mk/rc启动脚本。
 * 用过gdb、trace32、ASAN，ftrace，熟悉常用debug手段。
 * 研究过安卓平台wifi相关的framework、Android hal、内核驱动代码，例如wpa_supplicant、wificond、android.hardware.wifi@1.x-service，使用过wifi空口抓包工具。
@@ -41,10 +41,10 @@
 **中兴（2021/07 ~ 2022/07）**
 
 - **地点**：湖南长沙
-- **职位**：驱动开发工程师(wifi方向)
-- **项目描述** : 云电脑终端、云终端、视频会议终端等，涉及mtk/rk/amlogic三个安卓平台。
+- **职位**：驱动开发工程师
+- **项目描述** : 云电脑终端、云终端、视频会议终端等，涉及mtk/rockchip/amlogic三个安卓平台。
 - **工作内容** : 
-  * 负责新产品上wifi功能的适配。曾经独自在刚回板的rk安卓平台上适配过mtk sdio wifi/bt模组的wifi功能，涉及设备树、内核mmc子系统、wifi驱动、wpa_supplciant、android.hardware.wifi@1.x-service等很多地方的修改。
+  * 负责新产品上wifi功能的适配。曾经独自在刚回板的rockchip安卓平台上适配过mtk sdio wifi/bt模组的wifi功能，涉及设备树、内核mmc子系统、wifi驱动、wpa_supplciant、android.hardware.wifi@1.x-service等很多地方的修改。
   * 负责wpa_supplicant中IEEE 802.1x、eap认证框架之上，自定义wifi认证协议peap_90的移植与二次开发，以满足通过公司wifi热点接入内网时安全认证的需求。
   * 负责分析/解决各种wifi相关的问题，例如：连接慢/连不上/断连、GBK编码中文热点名兼容等问题。
 
@@ -54,7 +54,7 @@
 - **职位**：FW软件工程师
 - **项目描述** : 基站RU，Xilinx zynq平台。
 - **工作内容** : 
-  * 负责基站RU软件版本发布，系统根文件镜像制作。
+  * 负责基站RU软件版本发布，根文件系统镜像制作。
   * linux用户空间驱动移植、修改、测试。
   * 业务软件稳定性支持，GDB/ASAN debug。
 
