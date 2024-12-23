@@ -42,9 +42,31 @@ dtb只有1个，但1个内核支持多个dtb
 
  #define EXYNOS4412_CPU_ID	0xE4412200
 
-root=/dev/ram0 rw ramdisk=8192 initrd=0x41000000,8M console=ttySAC1,115200 init=/linuxrc mem=1024M 
+root=/dev/ram rw initrd=0x41000000,8M console=ttySAC1,115200 init=/linuxrc mem=1024M 
+"console=ttyS0,115200 earlyprintk panic=5 rootwait root=/dev/mtdblock3 rw rootfstype=jffs2"
+"console=ttyS0,115200 earlyprintk panic=5 rootwait root=/dev/ram initrd=0x80D50000,0xA00000"
 
+sudo rm -rf rootfs
 
+set -e
+mkdir rootfs
+
+dd if=/dev/zero of=initrd.img bs=10M count=1
+
+sudo mkfs.ext2 -m0 initrd.img
+
+sudo mount initrd.img rootfs
+
+ROOTFS_FILE=./buildroot-2021.02.4/output/images/rootfs.tar
+sudo tar -xvf $ROOTFS_FILE -C ./rootfs
+
+MOD_FILE=./linux/build/out/lib/modules
+sudo cp -r $MOD_FILE rootfs/lib/
+
+sudo umount rootfs
+
+gzip -c9 initrd.img > initrd.img.gz
+rm -rf initrd.img
 
 
 

@@ -3077,7 +3077,7 @@ sk_tx_queue_get返回的是struct sock sk里面的sk_tx_queue_mapping.
 
 ![image-20230302175954125](net.assets/image-20230302175954125.png)
 
-line4019~line4020 开启CONFIG_XPS但未配置rx queue/cpu mask时直接在line 2020 return -1
+line4019~line4020 开启CONFIG_XPS但未配置rx queue/cpu mask时直接在line 4020 return -1
 
 line4023~line4024如果配置了CPU mask但未配置rx queue mask则跳转至get_cpus_map
 
@@ -3632,7 +3632,46 @@ net/core/dev.c
 
 ## ifconfig eth0 up
 
-ifconfig eth0 up让网卡从down变成up时\_\_dev_change_flags会调用\_\_dev_open:
+
+
+busybox中ifconfig eth0 up时执行如下函数
+
+```
+
+static int set_if_flags(char *ifname, short flags)
+{
+         struct ifreq ifr;
+         int res = 0;
+         ifr.ifr_flags = flags;                                            
+         strncpy(ifr.ifr_name, ifname, IFNAMSIZ);    //ifr.ifr_name="eth0"
+
+         res = ioctl(skfd, SIOCSIFFLAGS, &ifr);    //通过ioctl()向内核socket传递命令SIOCSIFFLAGS和ifr变量
+         if (res < 0) {
+                  saved_errno = errno;
+                  v_print("Interface '%s': Error: SIOCSIFFLAGS failed: %s\n",
+                          ifname, strerror(saved_errno));
+         } else {
+                  v_print("Interface '%s': flags set to %04X.\n", ifname, flags);
+         }
+         return res;
+}
+```
+
+到内核中调用如下:
+
+```
+dev_ioctl
+
+	dev_ifsioc(net, &ifr, SIOCSIFFLAGS)->
+
+ 　　   dev_change_flags(dev, ifr->ifr_flags)-> 
+
+         　　__dev_change_flags(dev, flags);
+```
+
+
+
+\_\_dev_change_flags会调用\_\_dev_open:
 
 ![image-20230301173249570](net.assets/image-20230301173249570.png)
 
@@ -3677,7 +3716,7 @@ __dev_set_rx_mode函数里看下网卡是否有接收MAC地址屏蔽功能(IFF_U
 
 
 
-如果没有接收MAC地址屏蔽功能，则在单播MAC地址dev->uc不为空且上层协议栈不处于因uc导致的混杂模式，则需要调用\_\_dev_set_promiscuity告诉上层网络协议栈切换成因uc导致的混杂模式。反之单播MAC地址dev->uc为空且上层协议栈处于因uc导致的混杂模式，则需要调用\_\_dev_set_promiscuity告诉上层网络协议栈关闭因uc导致的混杂模式。dev->uc_promisc仅在不支持接收MAC地址屏蔽功能才有意义。
+如果没有接收MAC地址屏蔽功能，则在单播MAC地址dev->uc不为空且上层协议栈不处于因uc导致的混杂模式，则需要调用\_\_dev_set_promiscuity告诉上层网络协议栈切换成因uc导致的混杂模式。反之单播MAC地址dev->uc为空或上层协议栈处于因uc导致的混杂模式，则需要调用\_\_dev_set_promiscuity告诉上层网络协议栈关闭因uc导致的混杂模式。dev->uc_promisc仅在不支持接收MAC地址屏蔽功能才有意义。
 
 
 
@@ -3703,8 +3742,8 @@ attach_default_qdiscs函数里根据网卡设备，对排队规则进行不同�
 
     设备只有一个队列，或者设置了IFF_NO_QUEUE标志，为此队列绑定默认的qdisc:
     dev->qdisc                     =  dev->_tx[0]->qdisc_sleeping
-    dev->_tx[i]->qdisc             =  &noop_qdisc
-    dev->_tx[i]->qdisc_sleeping    =  Qdisc(default_qdisc_ops)
+    dev->_tx[0]->qdisc             =  &noop_qdisc
+    dev->_tx[0]->qdisc_sleeping    =  Qdisc(default_qdisc_ops)
     
     对于多队列设备，创建默认的MQ队列:
     dev->qdisc                     = Qdisc(mq_qdisc_ops)
@@ -4841,6 +4880,237 @@ rx时可能需要屏蔽非本机的其他MAC地址，__dev_set_rx_mode的驱动�
 
 
 ![image-20230301171047414](net.assets/image-20230301171047414.png)
+
+
+
+
+
+## 网卡状态
+
+
+
+```
+目前内核中定义了5中设备状态，如下所示。
+
+enum netdev_state_t {
+    __LINK_STATE_START,
+    __LINK_STATE_PRESENT,
+    __LINK_STATE_NOCARRIER,
+    __LINK_STATE_LINKWATCH_PENDING,
+    __LINK_STATE_DORMANT,
+}; 
+
+
+网络设备PRESENT状态
+标志__LINK_STATE_PRESENT很好理解，其是最基础的设备标志，没有此标志，表明设备在系统中根本不可用。如下在设备注册函数register_netdevice之中，设置此标志；而在unregister_netdevice函数中将释放网络设备结构，并不需要清空此标志。
+
+int register_netdevice(struct net_device *dev)
+{
+    ...
+    /* Default initial state at registry is that the device is present.
+     */
+    set_bit(__LINK_STATE_PRESENT, &dev->state);
+
+
+另外，内核还提供了两个函数可在网卡驱动程序中使用，用于操作此标志位。如下函数netif_device_detach，将设备标志为已从系统中移除，不在可用，并且如果之前设备处于运行状态（__LINK_STATE_START，稍后介绍此标志位），停止所有发送队列。
+
+void netif_device_detach(struct net_device *dev)
+{
+    if (test_and_clear_bit(__LINK_STATE_PRESENT, &dev->state) &&
+        netif_running(dev)) {
+        netif_tx_stop_all_queues(dev);
+
+
+另一个函数为netif_device_attach，功能与以上的函数正相反，设置__LINK_STATE_PRESENT标志，表明设备在系统中重新可用。并且如果之前设备处于运行状态，唤醒所有发送队列，而且，启动设备的发送超时检测定时器watchdog。
+
+void netif_device_attach(struct net_device *dev)
+{
+    if (!test_and_set_bit(__LINK_STATE_PRESENT, &dev->state) &&
+        netif_running(dev)) {
+        netif_tx_wake_all_queues(dev);
+        __netdev_watchdog_up(dev);
+
+
+在Intel的ixgbe驱动中，和电源管理（PM）相关的两个函数：ixgbe_suspend和ixgbe_resume中，使用了以上的两个函数。首先，在ixgbe_suspend函数中，在需要设备挂起时，调用netif_device_detach函数将设备标识为由系统中移除。
+
+另外，在函数ixgbe_resume中，在设备恢复时，调用netif_device_attach函数，标识设备在系统中重新可用。
+
+static int ixgbe_suspend(struct pci_dev *pdev, pm_message_t state)
+{
+    retval = __ixgbe_shutdown(pdev, &wake);
+
+static int __ixgbe_shutdown(struct pci_dev *pdev, bool *enable_wake)
+{
+    netif_device_detach(netdev);
+	
+static int ixgbe_resume(struct pci_dev *pdev)
+{
+    err = ixgbe_init_interrupt_scheme(adapter);
+    if (!err && netif_running(netdev))
+        err = ixgbe_open(netdev);
+
+    if (!err)
+        netif_device_attach(netdev);
+
+
+内核实现__LINK_STATE_PRESENT标志位的判断为函数netif_device_present，此函数在内核虚拟设备层（net/core/dev.c）和网卡驱动中有非常多的调用。
+
+static inline bool netif_device_present(struct net_device *dev)
+{
+    return test_bit(__LINK_STATE_PRESENT, &dev->state);
+}
+
+
+网络设备START状态
+标志__LINK_STATE_START表明设备的up/shutdown状态。以下设备的打开函数__dev_open中将设置此标志，前提是设备上一节介绍的标志__LINK_STATE_PRESENT已经设置了，否者__dev_open函数返回错误码ENODEV。
+
+static int __dev_open(struct net_device *dev, struct netlink_ext_ack *extack)
+{
+    if (!netif_device_present(dev))
+        return -ENODEV;
+    ...
+    set_bit(__LINK_STATE_START, &dev->state);
+
+
+在设备的关闭函数__dev_close_many中，将清除此标志。
+
+static void __dev_close_many(struct list_head *head)
+{
+    list_for_each_entry(dev, head, close_list) {
+        /* Temporarily disable netpoll until the interface is down */
+        netpoll_poll_disable(dev);
+        call_netdevice_notifiers(NETDEV_GOING_DOWN, dev);
+
+        clear_bit(__LINK_STATE_START, &dev->state);
+
+
+网卡驱动程序不会操作此标志位，仅是对此位的判断。内核提供了函数netif_running检查设备的__LINK_STATE_START标志，来判断up状态。此函数在内核虚拟设备层（net/core/dev.c）和网卡驱动中有非常多的调用。
+
+static inline bool netif_running(const struct net_device *dev)
+{
+    return test_bit(__LINK_STATE_START, &dev->state);
+}
+
+
+网络设备NOCARRIER状态
+标志位__LINK_STATE_NOCARRIER，表示设备的链路link状态。网卡驱动程序使用以下两个函数netif_carrier_on和netif_carrier_off设置此标志位，当检测到物理链路up时，清除此标志；当链路down时，设置此标志位。
+
+void netif_carrier_on(struct net_device *dev)
+{
+    if (test_and_clear_bit(__LINK_STATE_NOCARRIER, &dev->state)) {
+        if (dev->reg_state == NETREG_UNINITIALIZED)
+            return;
+        atomic_inc(&dev->carrier_up_count);
+        linkwatch_fire_event(dev);
+        if (netif_running(dev))
+            __netdev_watchdog_up(dev);
+
+void netif_carrier_off(struct net_device *dev)
+{
+    if (!test_and_set_bit(__LINK_STATE_NOCARRIER, &dev->state)) {
+        if (dev->reg_state == NETREG_UNINITIALIZED)
+            return;
+        atomic_inc(&dev->carrier_down_count);
+        linkwatch_fire_event(dev);
+
+
+
+对于Intel网卡的i40e驱动，以下函数i40e_vsi_link_event根据链路状态link_up，分别调用netif_carrier_on和netif_carrier_off函数。
+
+static void i40e_vsi_link_event(struct i40e_vsi *vsi, bool link_up)
+{
+    switch (vsi->type) {
+    case I40E_VSI_MAIN:
+        if (link_up) {
+            netif_carrier_on(vsi->netdev);
+            netif_tx_wake_all_queues(vsi->netdev);
+        } else {
+            netif_carrier_off(vsi->netdev);
+            netif_tx_stop_all_queues(vsi->netdev);
+        }
+
+
+
+内核提供了函数netif_carrier_ok检查设备的__LINK_STATE_NOCARRIER标志，来判断物理链路状态。此函数在内核虚拟设备层（net/core/dev.c）和网卡驱动中有非常多的调用。
+
+static inline bool netif_carrier_ok(const struct net_device *dev)
+{
+    return !test_bit(__LINK_STATE_NOCARRIER, &dev->state);
+}
+
+
+网络设备LINKWATCH_PENDING状态
+此标志与上节介绍的标志__LINK_STATE_NOCARRIER关系密切，当网络设备的__LINK_STATE_NOCARRIER标志状态发送变化时，即无论是执行了netif_carrier_on或者netif_carrier_off都将调用以下函数linkwatch_fire_event，其将设置此标志，并且增加一个linkwatch事件，由函数linkwatch_add_event完成。
+
+void linkwatch_fire_event(struct net_device *dev)
+{
+    bool urgent = linkwatch_urgent_event(dev);
+
+    if (!test_and_set_bit(__LINK_STATE_LINKWATCH_PENDING, &dev->state)) {
+        linkwatch_add_event(dev);
+    } else if (!urgent)
+        return;
+
+    linkwatch_schedule_work(urgent);
+}
+
+
+linkwatch功能启用了一个delayed_work来执行添加的事件，以上的调用linkwatch_schedule_work将唤起此delayed_work的执行。其将调用如下的函数linkwatch_do_dev，清除设备的__LINK_STATE_LINKWATCH_PENDING标志。可见由于此标志的存在，如果linkwatch的链表中存在事件，不接受新的事件。
+
+static void linkwatch_do_dev(struct net_device *dev)
+{
+    /* We are about to handle this device, so new events can be accepted
+     */
+    clear_bit(__LINK_STATE_LINKWATCH_PENDING, &dev->state);
+
+    rfc2863_policy(dev);
+    if (dev->flags & IFF_UP && netif_device_present(dev)) {
+        if (netif_carrier_ok(dev))
+            dev_activate(dev);
+        else
+            dev_deactivate(dev);
+
+        netdev_state_change(dev);
+
+网络设备DORMANT状态
+标志位__LINK_STATE_DORMANT,表明接口当前实际上不能发送报文，但是处在一种挂起状态，需要等待一些外部事件。对于按需型接口，等待一些外部事件将接口置于UP状态。内核使用此标志的驱动程序很少，只有广域网类型的HDLC驱动，和infiniband等的驱动程序。
+
+内核提供了两个函数netif_dormant_on和netif_dormant_off操作此标志位，函数netif_dormant对此标志进行判断。
+
+static inline void netif_dormant_on(struct net_device *dev)
+{   
+    if (!test_and_set_bit(__LINK_STATE_DORMANT, &dev->state))
+        linkwatch_fire_event(dev);
+}
+static inline void netif_dormant_off(struct net_device *dev)
+{
+    if (test_and_clear_bit(__LINK_STATE_DORMANT, &dev->state))
+        linkwatch_fire_event(dev);
+}
+static inline bool netif_dormant(const struct net_device *dev)
+{
+    return test_bit(__LINK_STATE_DORMANT, &dev->state);
+}
+
+
+
+另外，以上介绍的状态标志__LINK_STATE_NOCARRIER和此处的__LINK_STATE_DORMANT标志，具有向上传导的属性，例如，物理设备的链路丢失之后，在其上建立的VLAN设备的链路也应修改状态。由以下函数netif_stacked_transfer_operstate完成此功能。
+
+void netif_stacked_transfer_operstate(const struct net_device *rootdev, struct net_device *dev)
+{
+    if (rootdev->operstate == IF_OPER_DORMANT)
+        netif_dormant_on(dev);
+    else
+        netif_dormant_off(dev);
+
+    if (netif_carrier_ok(rootdev))
+        netif_carrier_on(dev);
+    else
+        netif_carrier_off(dev);
+}
+```
+
+
 
 
 

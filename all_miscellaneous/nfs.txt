@@ -1,4 +1,5 @@
-mount -t nfs -o nolock,soft,timeo=1 10.0.2.2:/home/haijie.gong  /mnt/nfs
+mount -t nfs -o nolock,soft 10.0.2.2:/home/ghj  /mnt/nfs
+mount -t nfs -o nolock,soft 127.0.0.1:/home/ghj  /mnt/nfs
 
 
 以ghj身份创建/home/ghj/nfsShared文件夹
@@ -13,15 +14,15 @@ apt install nfs-kernel-server
 sudo exportfs -r
 nfs共涉及6个端口：
 111、2049以及剩下四个不固定的，可通过以下配置固定下来
-vim /etc/default/nfs-kernel-server :
+vim /etc/default/nfs-kernel-server 
 
 	RPCMOUNTDOPTS="--manage-gids --port 30003"
 
-vim /etc/default/nfs-common:
+vim /etc/default/nfs-common
 
 	STATDOPTS="--port 30001 --outgoing-port 30002"
 
-vim /etc/modprobe.d/lockd.conf:
+vim /etc/modprobe.d/lockd.conf
 
 	options lockd nlm_tcpport=30000
 	options lockd nlm_udpport=30000

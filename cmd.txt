@@ -35,7 +35,13 @@ update_resetreson
 mount -t nfs -o nolock,soft,timeo=1 192.168.76.9:/home/haijie.gong /mnt/nfs
 
 C:\qemu\qemu-system-x86_64 --accel hax  -nographic -smp 16 -m 6G -drive file=C:\disk\x64_disk.qcow2,format=qcow2 -drive file=E:\disk\x64_disk.raw,format=raw -drive file=D:\disk\x64_disk2.raw,format=raw -device virtio-net-pci,netdev=net0 -netdev user,id=net0,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22,hostfwd=tcp::8088-:8080
-
+C:\qemu\qemu-system-x86_64 
+--accel hax  -nographic -smp 16 -m 6G
+-drive file=C:\disk\x64_disk.qcow2,format=qcow2
+-drive file=E:\disk\x64_disk.raw,format=raw
+-drive file=D:\disk\x64_disk2.raw,format=raw
+-device virtio-net-pci,netdev=net0
+-netdev user,id=net0,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22,hostfwd=tcp::8088-:8080
 
 
 /home/haijie.gong/tools/opengrok/src/
@@ -72,8 +78,7 @@ cp arm-softmmu/qemu-system-arm /home/haijie.gong/imx_qemu_run/qemu/bin/
             status = "disabled";
         };
 
-各位，今后这个群专门用来讨论大包版本发布的事情，如果是解决了比较关键的问题例如block下一步工作的问题就发版本，如果有发版本的需要可以直接在群里提。
-今天FPGA和FW关于HW PAP问题的修改入库后暂时就不发了，版本太多了IV测不过来。
+
 
 
 

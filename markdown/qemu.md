@@ -184,6 +184,34 @@ https://www.bilibili.com/read/cv12752511
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+```
+qemu-system-x86_64 -nographic -smp 8 -m 6G -drive file=qemu_x64_disk.qcow2,format=qcow2  -device virtio-net-pci,netdev=net0 -netdev user,id=net0,net=192.168.76.0/24,dhcpstart=192.168.76.9,hostfwd=tcp::4022-:22,hostfwd=tcp::8088-:8080
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
 # 模拟  arm vexpress开发板
 
 https://www.qemu.org/docs/master/system/arm/vexpress.html
@@ -467,11 +495,11 @@ mount initrd.img mnt
 
 umount mnt
 
-gzip -d initrd.img > initrd.img.gz
+gzip -c initrd.img > initrd.img.gz
 
 
 
-使用qemu-system-xx 的-initrd选项指定initrd.img.gz文件 ，-append选项里 “root=/dev/ram rw rootfstype=ext2 console=ttyAMA0 init=/sbin/init”
+使用qemu-system-xx 的-initrd选项指定initrd.img.gz文件 ，-append选项里 “root=/dev/ram rw rootfstype=ext2 console=ttyAMA0 init=/sbin/init ”
 
 ## initramfs
 
